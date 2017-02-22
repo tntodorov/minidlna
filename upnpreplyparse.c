@@ -71,7 +71,7 @@ NameValueParserGetData(void * d, const char * datas, int l)
 
 void
 ParseNameValue(const char * buffer, int bufsize,
-                    struct NameValueParserData * data, uint32_t flags)
+                    struct NameValueParserData * data)
 {
     struct xmlparser parser;
     LIST_INIT(&(data->head));
@@ -83,7 +83,6 @@ ParseNameValue(const char * buffer, int bufsize,
     parser.endeltfunc = 0;
     parser.datafunc = NameValueParserGetData;
     parser.attfunc = 0;
-    parser.flags = flags;
     parsexml(&parser);
 }
 
@@ -102,16 +101,27 @@ char *
 GetValueFromNameValueList(struct NameValueParserData * pdata,
                           const char * Name)
 {
-    struct NameValue * nv;
-    char * p = NULL;
-    for(nv = pdata->head.lh_first;
-        (nv != NULL) && (p == NULL);
-        nv = nv->entries.le_next)
-    {
-        if(strcmp(nv->name, Name) == 0)
-            p = nv->value;
-    }
-    return p;
+	return GetValueFromNameValueListWithResumeSupport(pdata, Name, NULL);
+}
+
+char *
+GetValueFromNameValueListWithResumeSupport(struct NameValueParserData * pdata,
+const char * Name, struct NameValue const ** resume)
+{
+	const struct NameValue * nv = (resume == NULL || *resume == NULL) ? pdata->head.lh_first : *resume;
+	const char * p = NULL;
+	while (nv != NULL && p == NULL)
+	{
+		if (strcmp(nv->name, Name) == 0)
+		{
+			p = nv->value;
+		}
+
+		nv = nv->entries.le_next;
+	}
+
+	if (resume != NULL) *resume = nv;
+	return (char*) p;
 }
 
 /* debug all-in-one function 

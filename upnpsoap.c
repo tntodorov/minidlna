@@ -194,7 +194,7 @@ IsAuthorizedValidated(struct upnphttp * h, const char * action)
 	struct NameValueParserData data;
 	const char * id;
 
-	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data, XML_STORE_EMPTY_FL);
+	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data);
 	id = GetValueFromNameValueList(&data, "DeviceID");
 	if(id)
 	{
@@ -344,7 +344,7 @@ GetCurrentConnectionInfo(struct upnphttp * h, const char * action)
 	int id;
 	char *endptr = NULL;
 
-	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data, XML_STORE_EMPTY_FL);
+	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data);
 	id_str = GetValueFromNameValueList(&data, "ConnectionID");
 	DPRINTF(E_INFO, L_HTTP, "GetCurrentConnectionInfo(%s)\n", id_str);
 	if(id_str)
@@ -1146,9 +1146,9 @@ callback(void *args, int argc, char **argv, char **azColName)
 			ret = strcatf(str, "&lt;upnp:artist&gt;%s&lt;/upnp:artist&gt;", artist);
 		}
 		if( NON_ZERO(album_art) && (passed_args->filter & FILTER_UPNP_ALBUMARTURI) ) {
-			ret = strcatf(str, "&lt;upnp:albumArtURI ");
+			ret = strcatf(str, "&lt;upnp:albumArtURI");
 			if( passed_args->filter & FILTER_UPNP_ALBUMARTURI_DLNA_PROFILEID ) {
-				ret = strcatf(str, "dlna:profileID=\"JPEG_TN\" xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\"");
+				ret = strcatf(str, " dlna:profileID=\"JPEG_TN\" xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\"");
 			}
 			ret = strcatf(str, "&gt;http://%s:%d/AlbumArt/%s-%s.jpg&lt;/upnp:albumArtURI&gt;",
 			                   lan_addr[passed_args->iface].str, runtime_vars.port, album_art, detailID);
@@ -1203,7 +1203,7 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 	memset(&args, 0, sizeof(args));
 	memset(&str, 0, sizeof(str));
 
-	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data, 0);
+	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data);
 
 	ObjectID = GetValueFromNameValueList(&data, "ObjectID");
 	Filter = GetValueFromNameValueList(&data, "Filter");
@@ -1691,7 +1691,7 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 	memset(&args, 0, sizeof(args));
 	memset(&str, 0, sizeof(str));
 
-	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data, 0);
+	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data);
 
 	ContainerID = GetValueFromNameValueList(&data, "ContainerID");
 	Filter = GetValueFromNameValueList(&data, "Filter");
@@ -1840,7 +1840,7 @@ QueryStateVariable(struct upnphttp * h, const char * action)
 	struct NameValueParserData data;
 	const char * var_name;
 
-	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data, 0);
+	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data);
 	/*var_name = GetValueFromNameValueList(&data, "QueryStateVariable"); */
 	/*var_name = GetValueFromNameValueListIgnoreNS(&data, "varName");*/
 	var_name = GetValueFromNameValueList(&data, "varName");
@@ -1922,7 +1922,7 @@ SamsungSetBookmark(struct upnphttp * h, const char * action)
 	struct NameValueParserData data;
 	char *ObjectID, *PosSecond;
 
-	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data, 0);
+	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data);
 	ObjectID = GetValueFromNameValueList(&data, "ObjectID");
 	PosSecond = GetValueFromNameValueList(&data, "PosSecond");
 

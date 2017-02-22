@@ -64,7 +64,9 @@ typedef uint8_t media_types;
 #define TYPE_AUDIO   0x01
 #define TYPE_VIDEO   0x02
 #define TYPE_IMAGES  0x04
-#define ALL_MEDIA    TYPE_AUDIO|TYPE_VIDEO|TYPE_IMAGES
+#define TYPE_RESCAN  0x08
+#define TYPE_TV      0x10
+#define ALL_MEDIA    TYPE_AUDIO|TYPE_VIDEO|TYPE_IMAGES|TYPE_TV
 
 enum file_types {
 	TYPE_UNKNOWN,
@@ -76,6 +78,12 @@ struct media_dir_s {
  	char *path;             /* base path */
  	media_types types;      /* types of files to scan */
  	struct media_dir_s *next;
+};
+
+struct linked_names_s {
+	struct linked_names_s *next; /* needs to be first element! */
+	char *name;             /* base path */
+	uint8_t wildcard;
 };
 
 struct album_art_name_s {

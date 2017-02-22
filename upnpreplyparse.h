@@ -52,7 +52,7 @@ struct NameValueParserData {
 /* ParseNameValue() */
 void
 ParseNameValue(const char * buffer, int bufsize,
-               struct NameValueParserData * data, uint32_t flags);
+               struct NameValueParserData * data);
 
 /* ClearNameValueList() */
 void
@@ -62,6 +62,10 @@ ClearNameValueList(struct NameValueParserData * pdata);
 char *
 GetValueFromNameValueList(struct NameValueParserData * pdata,
                           const char * Name);
+
+char *
+GetValueFromNameValueListWithResumeSupport(struct NameValueParserData * pdata,
+					   const char * Name, struct NameValue const ** resume);
 
 /* GetValueFromNameValueListIgnoreNS() */
 char *

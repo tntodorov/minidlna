@@ -73,6 +73,8 @@ static inline int is_dir(const struct dirent *d)
 #endif
 }
 int xasprintf(char **strp, char *fmt, ...) __attribute__((__format__ (__printf__, 2, 3)));
+void x_strlcat(char *dst, const char *src, size_t size);
+void x_strlcpy(char *dst, const char *src, size_t size);
 int ends_with(const char * haystack, const char * needle);
 char *trim(char *str);
 char *strstrc(const char *s, const char *p, const char t);
@@ -81,6 +83,7 @@ char *modifyString(char *string, const char *before, const char *after, int noal
 char *escape_tag(const char *tag, int force_alloc);
 char *unescape_tag(const char *tag, int force_alloc);
 char *strip_ext(char *name);
+char *strip_char(char *name, char c);
 
 /* Metadata functions */
 int is_video(const char * file);
@@ -88,12 +91,16 @@ int is_audio(const char * file);
 int is_image(const char * file);
 int is_playlist(const char * file);
 int is_caption(const char * file);
+int is_metadata(const char * file);
 int is_album_art(const char * name);
-int resolve_unknown_type(const char * path, media_types dir_type);
+enum file_types resolve_unknown_type(const char * path, media_types dir_type);
+enum file_types	resolve_file_type(const struct dirent* dirent, const char *path, media_types dir_types);
 const char *mime_to_ext(const char * mime);
 
 /* Others */
 int make_dir(char * path, mode_t mode);
+int copy_file(const char *src_file, const char *dst_file);
+int link_file(const char *src_file, const char *dst_file);
 unsigned int DJBHash(uint8_t *data, int len);
 
 #endif

@@ -590,6 +590,8 @@ init(int argc, char **argv)
 						types |= TYPE_VIDEO;
 					else if (*path == 'P' || *path == 'p')
 						types |= TYPE_IMAGES;
+					else if (*path == 'T' || *path == 't')
+						types |= TYPE_TV;
 					else
 						DPRINTF(E_FATAL, L_GENERAL, "Media directory entry not understood [%s]\n",
 							ary_options[i].value);
@@ -691,6 +693,10 @@ init(int argc, char **argv)
 			case 'P':
 			case 'p':
 				runtime_vars.root_container = IMAGE_ID;
+				break;
+			case 'T':
+			case 't':
+				runtime_vars.root_container = VIDEO_SERIES_ID;
 				break;
 			default:
 				runtime_vars.root_container = ary_options[i].value;

@@ -25,8 +25,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <limits.h>
+#include <libgen.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -144,6 +144,28 @@ strcasestrc(const char *s, const char *p, const char t)
 	return NULL;
 } 
 
+/* Copies characters from one buffer to another; size is maximum size of dst buffer */
+void
+x_strlcpy(char *dst, const char *src, size_t size)
+{
+	while (--size > 0 && *src != '\0') {
+		*dst++ = *src++;
+	}
+	*dst = '\0';
+}
+
+/* Appends characters from one buffer to another; size is maximum size of dst buffer */
+void
+x_strlcat(char *dst, const char *src, size_t size)
+{
+	while (size > 0 && *dst != '\0') {
+		size--;
+		dst++;
+	}
+
+	x_strlcpy(dst, src, size);
+}
+
 char *
 modifyString(char *string, const char *before, const char *after, int noalloc)
 {
@@ -233,13 +255,17 @@ escape_tag(const char *tag, int force_alloc)
 char *
 strip_ext(char *name)
 {
-	char *period;
+	return strip_char(name, '.');
+}
 
-	period = strrchr(name, '.');
-	if (period)
-		*period = '\0';
+char *
+strip_char(char *name, char c)
+{
+	char *last_occurence = strrchr(name, c);
+	if (last_occurence)
+		*last_occurence = '\0';
 
-	return period;
+	return last_occurence;
 }
 
 /* Code basically stolen from busybox */
@@ -289,6 +315,58 @@ make_dir(char * path, mode_t mode)
 		*s = c;
 
 	} while (1);
+}
+
+int
+copy_file(const char *src_file, const char *dst_file)
+{
+	char buf[MAXPATHLEN];
+	size_t nread;
+	size_t nwritten = 0;
+	size_t size = 0;
+
+	strncpyt(buf, dst_file, sizeof(buf));
+	make_dir(dirname(buf), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+
+	FILE *fsrc = fopen(src_file, "rb");
+	FILE *fdst = fopen(dst_file, "wb");
+
+	while ((nread = fread(buf, 1, sizeof(buf), fsrc)) > 0)
+	{
+		size += nread;
+		nwritten += fwrite(buf, 1, nread, fdst);
+	}
+
+	fclose(fsrc);
+	fclose(fdst);
+
+	if (nwritten != size)
+	{
+		DPRINTF(E_WARN, L_ARTWORK, "copying %s to %s failed [%s]\n", src_file, dst_file, strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+int
+link_file(const char *src_file, const char *dst_file)
+{
+	if (link(src_file, dst_file) == 0)
+		return 0;
+
+	if (errno == ENOENT)
+	{
+		char *dir = strdup(dst_file);
+		make_dir(dirname(dir), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+		free(dir);
+		if (link(src_file, dst_file) == 0)
+			return 0;
+		/* try a softlink if all else fails */
+		if (symlink(src_file, dst_file) == 0)
+			return 0;
+	}
+	DPRINTF(E_INFO, L_GENERAL, "Linking %s to %s failed [%s]\n", src_file, dst_file, strerror(errno));
+	return -1;
 }
 
 /* Simple, efficient hash function from Daniel J. Bernstein */
@@ -420,6 +498,12 @@ is_caption(const char * file)
 }
 
 int
+is_metadata(const char * file)
+{
+	return ends_with(file, ".nfo");
+}
+
+int
 is_album_art(const char * name)
 {
 	struct album_art_name_s * album_art_name;
@@ -442,7 +526,7 @@ is_album_art(const char * name)
 	return (album_art_name ? 1 : 0);
 }
 
-int
+enum file_types
 resolve_unknown_type(const char * path, media_types dir_type)
 {
 	struct stat entry;
@@ -473,33 +557,20 @@ resolve_unknown_type(const char * path, media_types dir_type)
 		}
 		else if( S_ISREG(entry.st_mode) )
 		{
-			switch( dir_type )
-			{
-				case ALL_MEDIA:
-					if( is_image(path) ||
-					    is_audio(path) ||
-					    is_video(path) ||
-					    is_playlist(path) )
-						type = TYPE_FILE;
-					break;
-				case TYPE_AUDIO:
-					if( is_audio(path) ||
-					    is_playlist(path) )
-						type = TYPE_FILE;
-					break;
-				case TYPE_VIDEO:
-					if( is_video(path) )
-						type = TYPE_FILE;
-					break;
-				case TYPE_IMAGES:
-					if( is_image(path) )
-						type = TYPE_FILE;
-					break;
-				default:
-					break;
-			}
+			if ((dir_type & TYPE_AUDIO) && (is_audio(path) || is_playlist(path))) type = TYPE_FILE;
+			if (((dir_type & TYPE_VIDEO) || (dir_type & TYPE_TV)) && is_video(path)) type = TYPE_FILE;
+			if ((dir_type & TYPE_IMAGES) && is_image(path)) type = TYPE_FILE;
+			if ((dir_type & TYPE_RESCAN) && (is_caption(path) || is_metadata(path) || is_image(path))) type = TYPE_FILE;
 		}
 	}
 	return type;
 }
 
+enum file_types
+resolve_file_type(const struct dirent* dirent, const char *path, media_types dir_types)
+{
+	if (is_dir(dirent) == 1) return TYPE_DIR;
+	if (is_reg(dirent) == 1) return TYPE_FILE;
+
+	return resolve_unknown_type(path, dir_types);
+}

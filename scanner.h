@@ -44,6 +44,7 @@
 #define VIDEO_GENRE_ID		"2$9"
 #define VIDEO_ACTOR_ID		"2$A"
 #define VIDEO_SERIES_ID		"2$E"
+#define VIDEO_MOVIES_ID		"2$F"
 #define VIDEO_PLIST_ID		"2$10"
 #define VIDEO_DIR_ID		"2$15"
 #define VIDEO_RATING_ID		"2$200"
@@ -59,6 +60,12 @@
 
 extern int valid_cache;
 
+#if SCANDIR_CONST
+typedef const struct dirent scan_filter;
+#else
+typedef struct dirent scan_filter;
+#endif /* SCANDIR_CONST */
+
 int
 is_video(const char *file);
 
@@ -71,16 +78,25 @@ is_image(const char *file);
 int64_t
 get_next_available_id(const char *table, const char *parentID);
 
+int
+get_directory_entries(struct dirent ***namelist, const char *dir, media_types dir_types);
+
 int64_t
 insert_directory(const char *name, const char *path, const char *base, const char *parentID, int objectID);
 
 int
 insert_file(char *name, const char *path, const char *parentID, int object, media_types dir_types);
 
+void
+insert_containers_for_video(const char *name, const char *refID, const char *class, int64_t detailID);
+
 int
 CreateDatabase(void);
 
 void
 start_scanner();
+
+void
+start_rescanner();
 
 #endif
