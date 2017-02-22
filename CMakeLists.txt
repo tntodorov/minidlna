@@ -68,7 +68,7 @@ set(SOURCE_FILES
         utils.c
         utils.h
         uuid.c
-        uuid.h)
+        uuid.h metadata_ext.h metadata_ext.c)
 
 include_directories(.)
 include_directories(tagutils)
@@ -87,7 +87,9 @@ find_package(FLAC)
 find_package(Exif)
 find_package(JPEG)
 find_package(ID3Tag)
+find_package(CURL)
+find_package(Jansson)
 
 target_link_libraries(minidlna ${minidlna_client_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${LIBVORBIS_LIBRARIES}
         ${LIBOGG_LIBRARIES} ${SQLITE3_LIBRARIES} ${LIBFLAC_LIBRARIES} ${LIBEXIF_LIBRARIES} ${JPEG_LIBRARIES}
-        ${LIBID3TAG_LIBRARIES})
+        ${LIBID3TAG_LIBRARIES} ${CURL_LIBRARIES} ${LIBJANSSON_LIBRARIES})

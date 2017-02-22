@@ -46,6 +46,7 @@
 #include "albumart.h"
 #include "containers.h"
 #include "log.h"
+#include "metadata_ext.h"
 
 #if SCANDIR_CONST
 typedef const struct dirent scan_filter;
@@ -464,12 +465,13 @@ insert_file(char *name, const char *path, const char *parentID, int object, medi
 		strcpy(class, "item.imageItem.photo");
 		detailID = GetImageMetadata(path, name);
 	}
-	else if( (types & TYPE_VIDEO) && is_video(name) )
+	else if( ((types & TYPE_VIDEO) || (types & TYPE_TV)) && is_video(name) )
 	{
  		orig_name = strdup(name);
 		strcpy(base, VIDEO_DIR_ID);
 		strcpy(class, "item.videoItem");
 		detailID = GetVideoMetadata(path, name);
+		detailID = search_ext_meta(path, name, detailID);
 		if( !detailID )
 			strcpy(name, orig_name);
 	}
@@ -538,6 +540,8 @@ CreateDatabase(void)
 	                        VIDEO_ID, "0", _("Video"),
 	                    VIDEO_ALL_ID, VIDEO_ID, _("All Video"),
 	                    VIDEO_DIR_ID, VIDEO_ID, _("Folders"),
+			 VIDEO_MOVIES_ID, VIDEO_ID, _("Movies"),
+			 VIDEO_SERIES_ID, VIDEO_ID, _("TV Shows"),
 
 	                        IMAGE_ID, "0", _("Pictures"),
 	                    IMAGE_ALL_ID, IMAGE_ID, _("All Pictures"),
@@ -569,7 +573,7 @@ CreateDatabase(void)
 	ret = sql_exec(db, create_settingsTable_sqlite);
 	if( ret != SQLITE_OK )
 		goto sql_failed;
-	ret = sql_exec(db, "INSERT into SETTINGS values ('UPDATE_ID', '0')");
+	ret = sql_exec(db, "INSERT into SETTINGS values ('UPDATE_ID', '0', '0')");
 	if( ret != SQLITE_OK )
 		goto sql_failed;
 	for( i=0; containers[i]; i=i+3 )
@@ -734,15 +738,19 @@ ScanDirectory(const char *dir, const char *parent, media_types dir_types)
 			n = scandir(dir, &namelist, filter_a, alphasort);
 			break;
 		case TYPE_AUDIO|TYPE_VIDEO:
+		case TYPE_AUDIO|TYPE_VIDEO|TYPE_TV:
 			n = scandir(dir, &namelist, filter_av, alphasort);
 			break;
 		case TYPE_AUDIO|TYPE_IMAGES:
 			n = scandir(dir, &namelist, filter_ap, alphasort);
 			break;
 		case TYPE_VIDEO:
+		case TYPE_TV:
+		case TYPE_VIDEO|TYPE_TV:
 			n = scandir(dir, &namelist, filter_v, alphasort);
 			break;
 		case TYPE_VIDEO|TYPE_IMAGES:
+		case TYPE_VIDEO|TYPE_IMAGES|TYPE_TV:
 			n = scandir(dir, &namelist, filter_vp, alphasort);
 			break;
 		case TYPE_IMAGES:
@@ -871,7 +879,7 @@ start_scanner()
 		/* Use TIMESTAMP to store the media type */
 		sql_exec(db, "UPDATE DETAILS set TIMESTAMP = %d where ID = %lld", media_path->types, (long long)id);
 		ScanDirectory(media_path->path, parent, media_path->types);
-		sql_exec(db, "INSERT into SETTINGS values (%Q, %Q)", "media_dir", media_path->path);
+		sql_exec(db, "INSERT into SETTINGS values (%Q, %Q, %d)", "media_dir", media_path->path, media_path->types);
 	}
 	_notify_stop();
 	/* Create this index after scanning, so it doesn't slow down the scanning process.

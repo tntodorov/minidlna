@@ -35,6 +35,16 @@
 #include "utils.h"
 #include "log.h"
 
+static const char * strip_words[] = {
+	"BluRay", "Xvid", "XVID", "XVid", "xvid",
+	"hdrip", "HDrip", "HDRip", "HDRIP",
+	"x264", "aac", "AAC", "720p", "1080p",
+	"ac3", "AC3", "yify", "YIFY", "DVDrip",
+	"dvdrip", "DVDRip", "DVDSCR", "DVDScr",
+	"DVDscr", "DVD-SCR", "DVD-scr", "DVD-Scr",
+	"dvdscr", 0
+};
+
 int
 xasprintf(char **strp, char *fmt, ...)
 {
@@ -240,6 +250,80 @@ strip_ext(char *name)
 		*period = '\0';
 
 	return period;
+}
+
+char *
+cleanup_name(char *name)
+{
+	char *clean;
+	char *found;
+	int pos = 0;
+
+	clean = strdup(name);
+	if( strchr(clean, '.') || strchr(clean, '_') || strchr(clean, '-'))
+	{
+		clean = modifyString(clean, ".", " ", 0);
+		clean = modifyString(clean, "_", " ", 0);
+		clean = modifyString(clean, "-", " ", 0);
+	}
+
+	while (strip_words[pos] != 0)
+	{
+		found = strstr(clean, strip_words[pos]);
+		if (found)
+			*found = '\0';
+		pos++;
+	}
+
+	return trim(clean);
+}
+
+char *
+strip_year(char *name)
+{
+	char *idx, year[5] = { 0 };
+	int counter = 0, starts_at = -1, pos = -1;
+	idx = name;
+	while (*name != '\0')
+	{
+		pos++;
+		if (isdigit(*name))
+		{
+			if (counter == 0)
+				memset(year, 0, sizeof(year));
+			if (starts_at == -1)
+				starts_at = pos;
+			year[counter++] = *name;
+			if (counter > 4)
+			{
+				// obviously not a year
+				while (*name != '\0' && isdigit(*name))
+				{
+					name++;
+					pos++;
+				}
+				counter = 0;
+				starts_at = -1;
+			}
+		}
+		else
+		{
+			if (counter < 4)
+				counter = 0;
+		}
+		name++;
+	}
+
+	if ((counter == 4) && (starts_at > 0))
+	{
+		/* we found a valid year, duplicate it and cut off from it to the end of the name */
+		char *ret = strdup(year);
+		idx[starts_at] = '\0';
+		trim(idx);
+		return ret;
+	}
+
+	return NULL;
 }
 
 /* Code basically stolen from busybox */

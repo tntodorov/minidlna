@@ -100,4 +100,6 @@ GetImageMetadata(const char *path, char *name);
 int64_t
 GetVideoMetadata(const char *path, char *name);
 
+void
+free_metadata(metadata_t *m, uint32_t flags);
 #endif

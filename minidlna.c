@@ -94,6 +94,7 @@
 #include "log.h"
 #include "tivo_beacon.h"
 #include "tivo_utils.h"
+#include "metadata_ext.h"
 
 #if SQLITE_VERSION_NUMBER < 3005001
 # warning "Your SQLite3 library appears to be too old!  Please use 3.5.1 or newer."
@@ -357,7 +358,7 @@ rescan:
 			free(children);
 			log_close();
 			freeoptions();
-			free(children);
+//			free(children);
 			exit(EXIT_SUCCESS);
 		}
 		else if (*scanner_pid < 0)
@@ -590,6 +591,8 @@ init(int argc, char **argv)
 						types |= TYPE_VIDEO;
 					else if (*path == 'P' || *path == 'p')
 						types |= TYPE_IMAGES;
+					else if (*path == 'T' || *path == 't')
+						types |= TYPE_TV;
 					else
 						DPRINTF(E_FATAL, L_GENERAL, "Media directory entry not understood [%s]\n",
 							ary_options[i].value);
@@ -692,6 +695,10 @@ init(int argc, char **argv)
 			case 'p':
 				runtime_vars.root_container = IMAGE_ID;
 				break;
+			case 'T':
+			case 't':
+				runtime_vars.root_container = VIDEO_SERIES_ID;
+				break;
 			default:
 				runtime_vars.root_container = ary_options[i].value;
 				DPRINTF(E_WARN, L_GENERAL, "Using arbitrary root container [%s]\n",
@@ -730,6 +737,10 @@ init(int argc, char **argv)
 		case WIDE_LINKS:
 			if (strtobool(ary_options[i].value))
 				SETFLAG(WIDE_LINKS_MASK);
+			break;
+		case EXTERNAL_METADATA:
+			if (strtobool(ary_options[i].value))
+				SETFLAG(EXT_META_MASK);
 			break;
 		default:
 			DPRINTF(E_ERROR, L_GENERAL, "Unknown option in file %s\n",
@@ -1027,6 +1038,7 @@ main(int argc, char **argv)
 	}
 
 	LIST_INIT(&upnphttphead);
+	init_ext_meta();
 
 	ret = open_db(NULL);
 	if (ret == 0)

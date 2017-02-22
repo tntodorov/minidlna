@@ -64,7 +64,8 @@ typedef uint8_t media_types;
 #define TYPE_AUDIO   0x01
 #define TYPE_VIDEO   0x02
 #define TYPE_IMAGES  0x04
-#define ALL_MEDIA    TYPE_AUDIO|TYPE_VIDEO|TYPE_IMAGES
+#define TYPE_TV      0x10
+#define ALL_MEDIA    TYPE_AUDIO|TYPE_VIDEO|TYPE_IMAGES|TYPE_TV
 
 enum file_types {
 	TYPE_UNKNOWN,
