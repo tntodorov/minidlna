@@ -742,6 +742,25 @@ init(int argc, char **argv)
 			if (strtobool(ary_options[i].value))
 				SETFLAG(EXT_META_MASK);
 			break;
+		case EXTERNAL_STRIP_FROM_NAME:
+			for (string = ary_options[i].value; (word = strtok(string, "/")); string = NULL)
+			{
+				struct strip_word_s * this_word = calloc(1, sizeof(struct strip_word_s));
+				this_word->word = strdup(word);
+				if (strip_from_names)
+				{
+					struct strip_word_s * all_strip_words = strip_from_names;
+					while( all_strip_words->next )
+						all_strip_words = all_strip_words->next;
+					all_strip_words->next = this_word;
+				}
+				else
+					strip_from_names = this_word;
+			}
+			break;
+		case EXTERNAL_MOVIEDB_API_KEY:
+			strncpyt(the_moviedb_api_key, ary_options[i].value, EXTERNAL_SVC_API_KEY_LEN);
+			break;
 		default:
 			DPRINTF(E_ERROR, L_GENERAL, "Unknown option in file %s\n",
 				optionsfile);

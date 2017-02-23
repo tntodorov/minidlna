@@ -44,18 +44,6 @@
 #include "sql.h"
 #include "log.h"
 
-#define FLAG_TITLE	0x00000001
-#define FLAG_ARTIST	0x00000002
-#define FLAG_ALBUM	0x00000004
-#define FLAG_GENRE	0x00000008
-#define FLAG_COMMENT	0x00000010
-#define FLAG_CREATOR	0x00000020
-#define FLAG_DATE	0x00000040
-#define FLAG_DLNA_PN	0x00000080
-#define FLAG_MIME	0x00000100
-#define FLAG_DURATION	0x00000200
-#define FLAG_RESOLUTION	0x00000400
-
 /* Audio profile flags */
 enum audio_profiles {
 	PROFILE_AUDIO_UNKNOWN,
@@ -245,10 +233,18 @@ free_metadata(metadata_t *m, uint32_t flags)
 		free(m->genre);
 	if( flags & FLAG_CREATOR )
 		free(m->creator);
+	if( flags & FLAG_PUBLISHER )
+		free(m->publisher);
+	if( flags & FLAG_AUTHOR )
+		free(m->author);
 	if( flags & FLAG_DATE )
 		free(m->date);
 	if( flags & FLAG_COMMENT )
 		free(m->comment);
+	if( flags & FLAG_DESCRIPTION )
+		free(m->description);
+	if( flags & FLAG_RATING )
+		free(m->rating);
 	if( flags & FLAG_DLNA_PN )
 		free(m->dlna_pn);
 	if( flags & FLAG_MIME )

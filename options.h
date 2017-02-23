@@ -60,6 +60,8 @@ enum upnpconfigoptions {
 	MERGE_MEDIA_DIRS,		/* don't add an extra directory level when there are multiple media dirs */
 	WIDE_LINKS,			/* allow following symlinks outside the defined media_dirs */
 	EXTERNAL_METADATA,		/* enable search and pulling of metadata from external sources like themoviedb.org */
+	EXTERNAL_STRIP_FROM_NAME,	/* words to strip from media file names before attempting to use them as metadata search keywords */
+	EXTERNAL_MOVIEDB_API_KEY,	/* API key for accessing metadata from the MovieDB.org */
 };
 
 /* readoptionsfile()

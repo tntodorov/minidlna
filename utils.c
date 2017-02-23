@@ -35,16 +35,6 @@
 #include "utils.h"
 #include "log.h"
 
-static const char * strip_words[] = {
-	"BluRay", "Xvid", "XVID", "XVid", "xvid",
-	"hdrip", "HDrip", "HDRip", "HDRIP",
-	"x264", "aac", "AAC", "720p", "1080p",
-	"ac3", "AC3", "yify", "YIFY", "DVDrip",
-	"dvdrip", "DVDRip", "DVDSCR", "DVDScr",
-	"DVDscr", "DVD-SCR", "DVD-scr", "DVD-Scr",
-	"dvdscr", 0
-};
-
 int
 xasprintf(char **strp, char *fmt, ...)
 {
@@ -257,7 +247,7 @@ cleanup_name(char *name)
 {
 	char *clean;
 	char *found;
-	int pos = 0;
+	struct strip_word_s *str;
 
 	clean = strdup(name);
 	if( strchr(clean, '.') || strchr(clean, '_') || strchr(clean, '-'))
@@ -267,12 +257,10 @@ cleanup_name(char *name)
 		clean = modifyString(clean, "-", " ", 0);
 	}
 
-	while (strip_words[pos] != 0)
+	for (str = strip_from_names; str != NULL; str = str->next)
 	{
-		found = strstr(clean, strip_words[pos]);
-		if (found)
-			*found = '\0';
-		pos++;
+		found = strstr(clean, str->word);
+		if (found) *found = '\0';
 	}
 
 	return trim(clean);

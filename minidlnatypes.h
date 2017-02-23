@@ -85,4 +85,8 @@ struct album_art_name_s {
 	struct album_art_name_s *next;
 };
 
+struct strip_word_s {
+	char *word;
+	struct strip_word_s *next;
+};
 #endif

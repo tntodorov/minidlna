@@ -78,6 +78,9 @@ insert_directory(const char *name, const char *path, const char *base, const cha
 int
 insert_file(char *name, const char *path, const char *parentID, int object, media_types dir_types);
 
+void
+insert_containers_for_video(const char *name, const char *refID, const char *class, int64_t detailID);
+
 int
 CreateDatabase(void);
 

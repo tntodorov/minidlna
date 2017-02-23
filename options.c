@@ -67,6 +67,8 @@ static const struct {
 	{ MERGE_MEDIA_DIRS, "merge_media_dirs" },
 	{ WIDE_LINKS, "wide_links" },
 	{ EXTERNAL_METADATA, "external_meta" },
+	{ EXTERNAL_STRIP_FROM_NAME, "external_meta_strip_words"},
+	{ EXTERNAL_MOVIEDB_API_KEY, "moviedb_api_key" },
 };
 
 int

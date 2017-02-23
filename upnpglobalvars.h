@@ -225,6 +225,9 @@ extern char db_path[];
 extern char log_path[];
 extern struct media_dir_s *media_dirs;
 extern struct album_art_name_s *album_art_names;
+extern struct strip_word_s *strip_from_names;
+#define EXTERNAL_SVC_API_KEY_LEN 128
+extern char the_moviedb_api_key[];
 extern short int scanning;
 extern volatile short int quitting;
 extern volatile uint32_t updateID;

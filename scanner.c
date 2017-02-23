@@ -137,6 +137,83 @@ insert_container(const char *item, const char *rootParent, const char *refID, co
 	return ret;
 }
 
+void
+insert_containers_for_video(const char *name, const char *refID, const char *class, int64_t detailID)
+{
+	char sql[128];
+	char **result;
+	int nrows;
+	int64_t objectID, parentID;
+	static long long last_movie_objectID = 0;
+
+	snprintf(sql, sizeof(sql), "SELECT ALBUM, DISC from DETAILS where ID = %lld", (long long)detailID);
+	if (sql_get_table(db, sql, &result, &nrows, NULL) != SQLITE_OK) return;
+	if (nrows == 0) goto _exit;
+
+	if (strcmp(class, "item.videoItem.movie") == 0 || strcmp(class, "item.videoItem") == 0)
+	{
+		int ret = sql_get_int64_field(db, "SELECT ID from OBJECTS WHERE DETAIL_ID = %lld and OBJECT_ID like '"VIDEO_MOVIES_ID"$'", (long long)detailID);
+		if (ret == 0)
+		{
+			if (!last_movie_objectID)
+			{
+				last_movie_objectID = get_next_available_id("OBJECTS", VIDEO_MOVIES_ID);
+			}
+			sql_exec(db, "INSERT into OBJECTS"
+				 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
+				 "VALUES"
+				 " ('"VIDEO_MOVIES_ID"$%llX', '"VIDEO_MOVIES_ID"', '%s', '%s', %lld, %Q)",
+				 last_movie_objectID++, refID, class, (long long)detailID, name);
+		}
+	}
+
+//	char *series = result[3], *season = result[4];
+//	int video_type = atoi(result[5]);
+//	static struct virtual_item last_series;
+//	static struct virtual_item last_season;
+
+
+//	if (video_type == TVEPISODE && series)
+//	{
+//		if (!valid_cache || strcmp(series, last_series.name) != 0)
+//		{
+//			char *series_album_art = sql_get_text_field(db, "SELECT ALBUM_ART from DETAILS d where VIDEO_TYPE = %u and ALBUM = (SELECT ALBUM from DETAILS d INNER JOIN OBJECTS o ON (d.ID = o.DETAIL_ID) where o.OBJECT_ID = %Q)", TVSERIES, refID);
+//			insert_container(series, VIDEO_SERIES_ID, NULL, "playlistContainer", NULL, NULL, series_album_art, &objectID, &parentID);
+//			sprintf(last_series.parentID, VIDEO_SERIES_ID"$%llX", (long long)parentID);
+//			strncpyt(last_series.name, series, sizeof(last_series.name));
+//			sqlite3_free(series_album_art);
+//		}
+//	}
+//	if (video_type == TVEPISODE && season)
+//	{
+//		if (!valid_cache || strcmp(season, last_season.name) != 0)
+//		{
+//			char *season_name;
+//			xasprintf(&season_name, _("Season %02d"), atoi(season));
+//			char *season_album_art = sql_get_season_folder_for_series(refID, last_series.name);
+//			insert_container(season_name, last_series.parentID, NULL, "playlistContainer", NULL, NULL, season_album_art, &objectID, &parentID);
+//			sprintf(last_season.parentID, "%s$%llX", last_series.parentID, (long long)parentID);
+//			strncpyt(last_season.name, season, sizeof(last_season.name));
+//			last_season.objectID = objectID;
+//			sqlite3_free(season_album_art);
+//			free(season_name);
+//		}
+//		else
+//		{
+//			last_season.objectID++;
+//		}
+//
+//		sql_exec(db, "INSERT into OBJECTS"
+//				 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
+//				 "VALUES"
+//				 " ('%s$%llX', '%s', '%s', '%s', %lld, %Q)",
+//			 last_season.parentID, last_season.objectID, last_season.parentID, refID, class, (long long)detailID, name);
+//	}
+
+_exit:
+	sqlite3_free_table(result);
+}
+
 static void
 insert_containers(const char *name, const char *path, const char *refID, const char *class, int64_t detailID)
 {
@@ -363,6 +440,7 @@ insert_containers(const char *name, const char *path, const char *refID, const c
 	else if( strstr(class, "videoItem") )
 	{
 		static long long last_all_objectID = 0;
+		insert_containers_for_video(name, refID, class, detailID);
 
 		/* All Videos */
 		if( !last_all_objectID )
@@ -469,7 +547,12 @@ insert_file(char *name, const char *path, const char *parentID, int object, medi
 	{
  		orig_name = strdup(name);
 		strcpy(base, VIDEO_DIR_ID);
-		strcpy(class, "item.videoItem");
+		if ((types & TYPE_VIDEO) && (types & TYPE_TV))
+			strcpy(class, "item.videoItem");
+		else if (types & TYPE_TV)
+			strcpy(class, "item.videoItem.videoBroadcast");
+		else
+			strcpy(class, "item.videoItem.movie");
 		detailID = GetVideoMetadata(path, name);
 		detailID = search_ext_meta(path, name, detailID);
 		if( !detailID )

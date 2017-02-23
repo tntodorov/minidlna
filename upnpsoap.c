@@ -763,8 +763,8 @@ object_exists(const char *object)
 
 #define COLUMNS "o.DETAIL_ID, o.CLASS," \
                 " d.SIZE, d.TITLE, d.DURATION, d.BITRATE, d.SAMPLERATE, d.ARTIST," \
-                " d.ALBUM, d.GENRE, d.COMMENT, d.CHANNELS, d.TRACK, d.DATE, d.RESOLUTION," \
-                " d.THUMBNAIL, d.CREATOR, d.DLNA_PN, d.MIME, d.ALBUM_ART, d.ROTATION, d.DISC "
+                " d.ALBUM, d.GENRE, d.COMMENT, d.DESCRIPTION, d.CHANNELS, d.TRACK, d.DATE, d.RESOLUTION," \
+                " d.THUMBNAIL, d.CREATOR, d.DLNA_PN, d.MIME, d.ALBUM_ART, d.ROTATION, d.DISC, d.RATING, d.AUTHOR, d.PUBLISHER "
 #define SELECT_COLUMNS "SELECT o.OBJECT_ID, o.PARENT_ID, o.REF_ID, " COLUMNS
 
 #define NON_ZERO(x) (x && atoi(x))
@@ -776,8 +776,9 @@ callback(void *args, int argc, char **argv, char **azColName)
 	struct Response *passed_args = (struct Response *)args;
 	char *id = argv[0], *parent = argv[1], *refID = argv[2], *detailID = argv[3], *class = argv[4], *size = argv[5], *title = argv[6],
 	     *duration = argv[7], *bitrate = argv[8], *sampleFrequency = argv[9], *artist = argv[10], *album = argv[11],
-	     *genre = argv[12], *comment = argv[13], *nrAudioChannels = argv[14], *track = argv[15], *date = argv[16], *resolution = argv[17],
-	     *tn = argv[18], *creator = argv[19], *dlna_pn = argv[20], *mime = argv[21], *album_art = argv[22], *rotate = argv[23];
+	     *genre = argv[12], *comment = argv[13], *description = argv[14], *nrAudioChannels = argv[15], *track = argv[16], *date = argv[17],
+	     *resolution = argv[18], *tn = argv[19], *creator = argv[20], *dlna_pn = argv[21], *mime = argv[22],
+	     *album_art = argv[23], *rotate = argv[24], *disc = argv[25], *rating = argv[26], *author = argv[27], *publisher = argv[28];
 	char dlna_buf[128];
 	const char *ext;
 	struct string_s *str = passed_args->str;
@@ -1362,6 +1363,7 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 				      where, THISORNUL(orderBy), StartingIndex, RequestedCount);
 		DPRINTF(E_DEBUG, L_HTTP, "Browse SQL: %s\n", sql);
 		ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
+		DPRINTF(E_DEBUG, L_HTTP, "TEST\n");
 	}
 	if( (ret != SQLITE_OK) && (zErrMsg != NULL) )
 	{
