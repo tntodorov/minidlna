@@ -34,6 +34,7 @@
 #include <libintl.h>
 #endif
 #include <sqlite3.h>
+#include <stdbool.h>
 #include "libav.h"
 
 #include "scanner_sqlite.h"
@@ -64,6 +65,18 @@ struct virtual_item
 	int64_t objectID;
 	char parentID[64];
 	char name[256];
+};
+
+struct genre_s
+{
+	char *name;
+	struct genre_s *next;
+};
+
+struct genre_virtual_item
+{
+	struct virtual_item *genre;
+	struct genre_virtual_item *next;
 };
 
 int64_t
@@ -146,31 +159,100 @@ insert_containers_for_video(const char *name, const char *refID, const char *cla
 	int64_t objectID, parentID;
 	static long long last_movie_objectID = 0;
 
-	snprintf(sql, sizeof(sql), "SELECT ALBUM, DISC from DETAILS where ID = %lld", (long long)detailID);
+	snprintf(sql, sizeof(sql), "SELECT ALBUM, DISC, GENRE from DETAILS where ID = %lld", (long long)detailID);
 	if (sql_get_table(db, sql, &result, &nrows, NULL) != SQLITE_OK) return;
 	if (nrows == 0) goto _exit;
 
+	char *series = result[3], *season = result[4], *genres_str = result[5];
+	static struct virtual_item last_series;
+	static struct virtual_item last_season;
+	struct genre_s *genre_tok = NULL;
+	static struct genre_virtual_item *genre_list = NULL;
+
+	DPRINTF(L_METADATA, E_DEBUG, "Processing the containers for %s [ref %s][%s][detail ID %lld]\n", name, refID, class, detailID);
+
+	if (genres_str && strlen(genres_str))
+	{
+		DPRINTF(L_METADATA, E_DEBUG, "Processing the following genre(s) %s\n", genres_str);
+		char *string, *word;
+		for (string = genres_str; (word = strtok(string, "|")); string = NULL)
+		{
+			struct genre_s * this_genre = calloc(1, sizeof(struct genre_s));
+			this_genre->name = strdup(word);
+			if (genre_tok)
+			{
+				struct genre_s * all_genres = genre_tok;
+				while( all_genres->next )
+					all_genres = all_genres->next;
+				all_genres->next = this_genre;
+			}
+			else
+				genre_tok = this_genre;
+		}
+	}
+
 	if (strcmp(class, "item.videoItem.movie") == 0 || strcmp(class, "item.videoItem") == 0)
 	{
-		int ret = sql_get_int64_field(db, "SELECT ID from OBJECTS WHERE DETAIL_ID = %lld and OBJECT_ID like '"VIDEO_MOVIES_ID"$'", (long long)detailID);
+		int ret = sql_get_int64_field(db, "SELECT ID from OBJECTS WHERE DETAIL_ID = %lld and OBJECT_ID like '"VIDEO_MOVIES_ALL_ID"$'", (long long)detailID);
 		if (ret == 0)
 		{
 			if (!last_movie_objectID)
 			{
-				last_movie_objectID = get_next_available_id("OBJECTS", VIDEO_MOVIES_ID);
+				last_movie_objectID = get_next_available_id("OBJECTS", VIDEO_MOVIES_ALL_ID);
 			}
 			sql_exec(db, "INSERT into OBJECTS"
 				 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
 				 "VALUES"
-				 " ('"VIDEO_MOVIES_ID"$%llX', '"VIDEO_MOVIES_ID"', '%s', '%s', %lld, %Q)",
+				 " ('"VIDEO_MOVIES_ALL_ID"$%llX', '"VIDEO_MOVIES_ALL_ID"', '%s', '%s', %lld, %Q)",
 				 last_movie_objectID++, refID, class, (long long)detailID, name);
 		}
+		if (genre_tok)
+		{
+			bool must_create;
+			struct genre_virtual_item *last_movie_genre;
+			struct genre_s *the_genre;
+			for (the_genre = genre_tok; the_genre != NULL; the_genre = the_genre->next)
+			{
+				must_create = true;
+				for (last_movie_genre = genre_list; last_movie_genre != NULL; last_movie_genre = last_movie_genre->next)
+				{
+					if (strcmp(the_genre->name, last_movie_genre->genre->name) == 0)
+					{
+						must_create = false;
+						break;
+					}
+				}
+				if (must_create)
+				{
+					last_movie_genre = calloc(1, sizeof(struct genre_virtual_item));
+					last_movie_genre->genre = calloc(1, sizeof(struct virtual_item));
+					insert_container(the_genre->name, VIDEO_MOVIES_GENRE_ID, NULL, "genre.videoGenre", NULL, NULL, NULL, &objectID, &parentID);
+					sprintf(last_movie_genre->genre->parentID, VIDEO_MOVIES_GENRE_ID"$%llX", (long long)parentID);
+					strncpyt(last_movie_genre->genre->name, the_genre->name, sizeof(last_movie_genre->genre->name));
+					last_movie_genre->genre->objectID = objectID;
+					if (genre_list)
+					{
+						struct genre_virtual_item *all = genre_list;
+						while (all->next)
+							all = all->next;
+						all->next = last_movie_genre;
+					}
+					else
+						genre_list = last_movie_genre;
+				}
+				else
+				{
+					last_movie_genre->genre->objectID++;
+				}
+				sql_exec(db, "INSERT into OBJECTS"
+					 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
+					 "VALUES"
+					 " ('%s$%llX', '%s', '%s', '%s', %lld, %Q)",
+					 last_movie_genre->genre->parentID, last_movie_genre->genre->objectID,
+					 last_movie_genre->genre->parentID, refID, class, (long long)detailID, name);
+			}
+		}
 	}
-
-//	char *series = result[3], *season = result[4];
-//	int video_type = atoi(result[5]);
-//	static struct virtual_item last_series;
-//	static struct virtual_item last_season;
 
 
 //	if (video_type == TVEPISODE && series)
@@ -212,6 +294,11 @@ insert_containers_for_video(const char *name, const char *refID, const char *cla
 
 _exit:
 	sqlite3_free_table(result);
+	while (genre_tok)
+	{
+		free(genre_tok->name);
+		genre_tok = genre_tok->next;
+	}
 }
 
 static void
@@ -625,6 +712,10 @@ CreateDatabase(void)
 	                    VIDEO_DIR_ID, VIDEO_ID, _("Folders"),
 			 VIDEO_MOVIES_ID, VIDEO_ID, _("Movies"),
 			 VIDEO_SERIES_ID, VIDEO_ID, _("TV Shows"),
+		     VIDEO_SERIES_ALL_ID, VIDEO_SERIES_ID, _("All TV Shows"),
+		   VIDEO_SERIES_GENRE_ID, VIDEO_SERIES_ID, _("Genre"),
+		     VIDEO_MOVIES_ALL_ID, VIDEO_MOVIES_ID, _("All Movies"),
+		   VIDEO_MOVIES_GENRE_ID, VIDEO_MOVIES_ID, _("Genre"),
 
 	                        IMAGE_ID, "0", _("Pictures"),
 	                    IMAGE_ALL_ID, IMAGE_ID, _("All Pictures"),

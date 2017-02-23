@@ -9,17 +9,16 @@
 #include <jansson.h>
 #include "upnpglobalvars.h"
 #include "log.h"
-#include "metadata_ext.h"
 #include "metadata.h"
+#include "metadata_ext.h"
 #include "utils.h"
 #include "sql.h"
 
 #define CURL_FETCH_BUFFER_SZ        	4096
 #define CURL_MOVIEDB_SEARCH_MOVIES	"https://api.themoviedb.org/3/search/movie?api_key=%s&query=%s"
+#define CURL_MOVIEDB_DETAIL_MOVIES	"https://api.themoviedb.org/3/movie/%ld?api_key=%s"
 #define CURL_MOVIEDB_SEARCH_TVSHOW	"https://api.themoviedb.org/3/search/tv?api_key=%s&query=%s"
 #define CURL_MOVIEDB_QUERY_WITH_YEAR    "%s&year=%s"
-#define CURL_MOVIEDB_GENRES_MOVIES      "https://api.themoviedb.org/3/genre/movie/list?api_key=%s"
-#define CURL_MOVIEDB_GENRES_TVSHOWS     "https://api.themoviedb.org/3/genre/tv/list?api_key=%s"
 
 struct http_response
 {
@@ -107,23 +106,23 @@ moviedb_search_movies(const char *search_crit, const char *year, CURL *conn, met
 		snprintf(query, MAXPATHLEN, CURL_MOVIEDB_QUERY_WITH_YEAR, tmp_str, year);
 		free(tmp_str);
 	}
-	DPRINTF(L_HTTP, E_DEBUG, "External metadata URL: %s\n", query);
+	DPRINTF(L_HTTP, E_DEBUG, "External metadata search URL: %s\n", query);
 	curl_easy_setopt(conn, CURLOPT_URL, query);
 
 	fetch_status = curl_easy_perform(conn);
 	if (fetch_status != 0)
 	{
-		DPRINTF(L_HTTP, E_ERROR, "External metadata fetch error: %s\n", curl_easy_strerror(fetch_status));
+		DPRINTF(L_HTTP, E_ERROR, "External metadata search error: %s\n", curl_easy_strerror(fetch_status));
 		ret = -2;
 		goto movie_search_error;
 	}
 	curl_easy_getinfo(conn, CURLINFO_RESPONSE_CODE, &http_resp_code);
 	if (http_resp_code != 200)
 	{
-		DPRINTF(L_HTTP, E_WARN, "External metadata server response: %ld\n", http_resp_code);
+		DPRINTF(L_HTTP, E_WARN, "External metadata search response: %ld\n", http_resp_code);
 	}
 	http_data[write_response.pos] = '\0';
-	DPRINTF(L_METADATA, E_DEBUG, "External metadata response: %s\n", http_data);
+	DPRINTF(L_METADATA, E_DEBUG, "External metadata search response: %s\n", http_data);
 
 	js_root = json_loads(http_data, 0, &js_err);
 	if (!js_root)
@@ -182,9 +181,128 @@ moviedb_search_movies(const char *search_crit, const char *year, CURL *conn, met
 	goto movie_search_cleanup;
 
 movie_search_error:
-	DPRINTF(L_METADATA, E_ERROR, "Failed to parse external metadata response.\n");
+	DPRINTF(L_METADATA, E_ERROR, "Failed to parse external metadata search response.\n");
 
 movie_search_cleanup:
+	if (http_data)
+		free(http_data);
+	if (js_root)
+		json_decref(js_root);
+	return ret;
+}
+
+static int64_t
+moviedb_get_movie_details(int64_t movie_id, CURL *conn, metadata_t *meta, uint32_t *metaflags, char **artwork_path)
+{
+	CURLcode fetch_status;
+	long http_resp_code;
+	char *http_data = NULL;
+	char query[MAXPATHLEN];
+	int64_t ret = 0;
+	json_t *js_root = NULL;
+	json_error_t js_err;
+	char helper[64];
+
+	memset(query, 0, sizeof(query));
+	memset(helper, 0, sizeof(helper));
+
+	http_data = malloc(CURL_FETCH_BUFFER_SZ);
+	if (!http_data)
+		return -1;
+	struct http_response write_response = {
+		.data = http_data,
+		.pos = 0
+	};
+	curl_easy_setopt(conn, CURLOPT_WRITEDATA, &write_response);
+
+	/* compile query */
+	snprintf(query, MAXPATHLEN, CURL_MOVIEDB_DETAIL_MOVIES, movie_id, the_moviedb_api_key);
+	DPRINTF(L_HTTP, E_DEBUG, "External metadata detail URL: %s\n", query);
+	curl_easy_setopt(conn, CURLOPT_URL, query);
+
+	fetch_status = curl_easy_perform(conn);
+	if (fetch_status != 0)
+	{
+		DPRINTF(L_HTTP, E_ERROR, "External metadata detail error: %s\n", curl_easy_strerror(fetch_status));
+		ret = -2;
+		goto movie_detail_error;
+	}
+	curl_easy_getinfo(conn, CURLINFO_RESPONSE_CODE, &http_resp_code);
+	if (http_resp_code != 200)
+	{
+		DPRINTF(L_HTTP, E_WARN, "External metadata details response: %ld\n", http_resp_code);
+	}
+	http_data[write_response.pos] = '\0';
+	DPRINTF(L_METADATA, E_DEBUG, "External metadata details response: %s\n", http_data);
+
+	js_root = json_loads(http_data, 0, &js_err);
+	if (!js_root)
+	{
+		DPRINTF(L_METADATA, E_ERROR, "JSON conversion failed: [%d] %s\n", js_err.line, js_err.text);
+		ret = -3;
+		goto movie_detail_error;
+	}
+	if (!json_is_object(js_root))
+	{
+		ret = -3;
+		goto movie_detail_error;
+	}
+	json_t *object = json_object_get(js_root, "tagline");
+	if (json_is_string(object))
+	{
+		meta->comment = strdup(json_string_value(object));
+		*metaflags |= FLAG_COMMENT;
+	}
+	object = json_object_get(js_root, "vote_average");
+	if (json_is_real(object))
+	{
+		snprintf(helper, 64, "%f/10", json_real_value(object));
+		meta->rating = strdup(helper);
+		*metaflags |= FLAG_RATING;
+	}
+	object = json_object_get(js_root, "genres");
+	if (json_is_array(object))
+	{
+		memset(helper, 0, sizeof(helper));
+		int genres_count = json_array_size(object);
+		for (int gpos = 0; gpos < genres_count; gpos++)
+		{
+			json_t *record = json_array_get(object, gpos);
+			json_t *genre_id = json_object_get(record, "id");
+			json_t *genre_name = json_object_get(record, "name");
+			if (json_is_integer(genre_id) && json_is_string(genre_name))
+			{
+				x_strlcat(helper, json_string_value(genre_name), sizeof(helper));
+				if (gpos < genres_count - 1)
+					x_strlcat(helper, "|", sizeof(helper));
+			}
+		}
+		if (strlen(helper) > 0)
+		{
+			meta->genre = strdup(helper);
+			*metaflags |= FLAG_GENRE;
+		}
+	}
+	object = json_object_get(js_root, "poster_path");
+	if (json_is_string(object))
+	{
+		*artwork_path = strdup(json_string_value(object));
+	}
+	if (!(*metaflags & FLAG_DATE))
+	{
+		object = json_object_get(js_root, "release_date");
+		if (json_is_string(object))
+		{
+			meta->date = strdup(json_string_value(object));
+			*metaflags |= FLAG_DATE;
+		}
+	}
+	goto movie_detail_cleanup;
+
+movie_detail_error:
+	DPRINTF(L_METADATA, E_ERROR, "Failed to parse external metadata response.\n");
+
+movie_detail_cleanup:
 	if (http_data)
 		free(http_data);
 	if (js_root)
@@ -205,6 +323,7 @@ search_ext_meta(const char *path, char *name, int64_t detailID)
 
 	metadata_t m_data;
 	uint32_t m_flags = FLAG_MIME|FLAG_DURATION|FLAG_DLNA_PN|FLAG_DATE;
+	char *album_art = NULL;
 
 	memset(&m_data, '\0', sizeof(m_data));
 
@@ -232,20 +351,30 @@ search_ext_meta(const char *path, char *name, int64_t detailID)
 	result = moviedb_search_movies(clean_name, year, fetch, &m_data, &m_flags);
 	if (result > 0)
 	{
+		if (moviedb_get_movie_details(result, fetch, &m_data, &m_flags, &album_art) == 0)
+		{
+			DPRINTF(L_METADATA, E_DEBUG, "Received movie poster path %s, and genre(s) %s\n",
+				album_art != NULL ? album_art : "[none exists]", m_flags & FLAG_GENRE ? m_data.genre : "[unknown]");
+		}
+	}
+	if (result > 0)
+	{
 		int ret_sql;
 		if (detailID)
 		{
-			ret_sql = sql_exec(db, "UPDATE DETAILS set TITLE = '%q', DATE = %Q, DESCRIPTION = %Q "
+			ret_sql = sql_exec(db, "UPDATE DETAILS set TITLE = '%q', DATE = %Q, DESCRIPTION = %Q, "
+					   "GENRE = %Q, COMMENT = %Q "
 					   "WHERE PATH=%Q and ID=%lld;", m_data.title, m_data.date,
-					   m_data.description, path, detailID);
+					   m_data.description, m_data.genre, m_data.comment, path, detailID);
 		}
 		else
 		{
 			ret_sql = sql_exec(db, "INSERT into DETAILS"
-					   " (PATH, SIZE, TIMESTAMP, DATE, TITLE, DESCRIPTION, MIME) "
-					   "VALUES (%Q, %lld, %lld, %Q, '%q', %Q, '%q');",
+					   " (PATH, SIZE, TIMESTAMP, DATE, TITLE, DESCRIPTION, MIME, COMMENT, GENRE) "
+					   "VALUES (%Q, %lld, %lld, %Q, '%q', %Q, '%q', %Q, %Q);",
 					   path, (long long)file.st_size, (long long)file.st_mtime,
-					   m_data.date, m_data.title, m_data.description, m_data.mime);
+					   m_data.date, m_data.title, m_data.description, m_data.mime,
+					   m_data.comment, m_data.genre);
 		}
 		if( ret_sql != SQLITE_OK )
 		{

@@ -52,6 +52,28 @@ xasprintf(char **strp, char *fmt, ...)
 	return ret;
 }
 
+/* Copies characters from one buffer to another; size is maximum size of dst buffer */
+void
+x_strlcpy(char *dst, const char *src, size_t size)
+{
+	while (--size > 0 && *src != '\0') {
+		*dst++ = *src++;
+	}
+	*dst = '\0';
+}
+
+/* Appends characters from one buffer to another; size is maximum size of dst buffer */
+void
+x_strlcat(char *dst, const char *src, size_t size)
+{
+	while (size > 0 && *dst != '\0') {
+		size--;
+		dst++;
+	}
+
+	x_strlcpy(dst, src, size);
+}
+
 int
 ends_with(const char * haystack, const char * needle)
 {
