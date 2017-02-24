@@ -265,18 +265,22 @@ strip_ext(char *name)
 }
 
 char *
-cleanup_name(char *name)
+cleanup_name(char *name, const char *strip)
 {
 	char *clean;
 	char *found;
 	struct strip_word_s *str;
+	size_t len = 0;
+	char rem[2] = { 0, 0 };
+
+	if (strip == NULL || (len = strlen(strip)) == 0)
+		return trim(name);
 
 	clean = strdup(name);
-	if( strchr(clean, '.') || strchr(clean, '_') || strchr(clean, '-'))
+	for (size_t pos = 0; pos < len; pos++)
 	{
-		clean = modifyString(clean, ".", " ", 0);
-		clean = modifyString(clean, "_", " ", 0);
-		clean = modifyString(clean, "-", " ", 0);
+		rem[0] = strip[pos];
+		clean = modifyString(clean, rem, " ", 0);
 	}
 
 	for (str = strip_from_names; str != NULL; str = str->next)
@@ -334,6 +338,254 @@ strip_year(char *name)
 	}
 
 	return NULL;
+}
+
+enum char_type_e
+{
+	CHARACTER, DIGIT,
+};
+
+void
+split_tv_name(const char *input, char **show_name, char **year, char **season, char **episode)
+{
+	char *work = NULL;
+	int found_season = 0, found_episode = 0, found_year = 0;
+	size_t season_pos = 0, episode_pos = 0, year_pos = 0;
+	char tmp[10] = { 0 };
+	uint8_t digit_count = 0;
+	size_t total_count = 0;
+	enum char_type_e previous = CHARACTER;
+
+	if (input == NULL || strlen(input) == 0)
+		return;
+
+	work = strdup(input);
+	size_t total_len = strlen(work);
+
+	//DEBUG DPRINTF(E_DEBUG, L_GENERAL, "Workpiece: [%lu] %s\n", total_len, work);
+
+	/* try and isolate the season and episode first */
+	while (total_count < total_len)
+	{
+		if (isdigit(work[total_count]))
+		{
+			tmp[digit_count++] = work[total_count];
+			previous = DIGIT;
+			if (digit_count == 10)
+				goto clean_up;
+		}
+		else
+		{
+			if (previous == DIGIT)
+			{
+				//DEBUG DPRINTF(E_DEBUG, L_GENERAL, "Digits in buffer: [%d at %d] %s\n", digit_count, total_count, tmp);
+				if (digit_count == 4) // may be year or dual-digit season+episode without delimiter or single digit season+3digit episode
+				{
+					if (!found_year)
+					{
+						int year_num = atoi(tmp);
+						if (year_num > 1900)
+						{
+							found_year = 1;
+							*year = strdup(tmp);
+							year_pos = total_count - 5;
+						}
+					}
+					else if (!found_season && !found_episode)
+					{
+						int episode_num = atoi(&tmp[2]);
+						if (episode_num > 0)
+							tmp[2] = '\0';
+						int season_num = atoi(tmp);
+						if ((season_num > 0) && (episode_num > 0))
+						{
+							found_episode = 1;
+							found_season = 1;
+							*season = strdup(tmp);
+							memset(tmp, 0, 10);
+							snprintf(tmp, 10, "%d", episode_num);
+							*episode = strdup(tmp);
+							season_pos = total_count - 5;
+							episode_pos = total_count - 3;
+						}
+					}
+				}
+				else if (digit_count == 3)
+				{
+					if (!found_season && !found_episode)
+					{
+						int episode_num = atoi(&tmp[1]);
+						if (episode_num > 0)
+							tmp[1] = '\0';
+						int season_num = atoi(tmp);
+						if ((season_num > 0) && (episode_num > 0))
+						{
+							found_episode = 1;
+							found_season = 1;
+							*season = strdup(tmp);
+							memset(tmp, 0, 10);
+							snprintf(tmp, 10, "%d", episode_num);
+							*episode = strdup(tmp);
+							season_pos = total_count - 4;
+							episode_pos = total_count - 3;
+						}
+					}
+				}
+				else if (digit_count == 2)
+				{
+					if (!found_season && (total_count > 2) && ((work[total_count - 3] == 'S') || (work[total_count - 3] == 's')))
+					{
+						int season_num = atoi(tmp);
+						if (season_num > 0)
+						{
+							found_season = 1;
+							season_pos = total_count - 4;
+							*season = strdup(tmp);
+						}
+					}
+					else if (found_season && !found_episode && (total_count > 2) && ((work[total_count - 3] == 'E') || (work[total_count - 3] == 'e')))
+					{
+						int episode_num = atoi(tmp);
+						if (episode_num > 0)
+						{
+							found_episode = 1;
+							episode_pos = total_count - 4;
+							*episode = strdup(tmp);
+						}
+					}
+				}
+				else if (digit_count == 1)
+				{
+					if (!found_season && (total_count > 1) && ((work[total_count - 2] == 'S') || (work[total_count - 2] == 's')))
+					{
+						int season_num = atoi(tmp);
+						if (season_num > 0)
+						{
+							found_season = 1;
+							season_pos = total_count - 3;
+							*season = strdup(tmp);
+						}
+					}
+					else if (found_season && !found_episode && (total_count > 1) && ((work[total_count - 1] == 'E') || (work[total_count - 1] == 'e')))
+					{
+						int episode_num = atoi(tmp);
+						if (episode_num > 0)
+						{
+							found_episode = 1;
+							episode_pos = total_count - 3;
+							*episode = strdup(tmp);
+						}
+					}
+				}
+			}
+			previous = CHARACTER;
+			digit_count = 0;
+			memset(tmp, 0, 10);
+		}
+
+		total_count++;
+	}
+	/* ... if the input ends with a number ... */
+	if (digit_count == 4)
+	{
+		if (!found_season && !found_episode)
+		{
+			int episode_num = atoi(&tmp[2]);
+			if (episode_num > 0)
+				tmp[2] = '\0';
+			int season_num = atoi(tmp);
+			if ((season_num > 0) && (episode_num > 0))
+			{
+				found_episode = 1;
+				found_season = 1;
+				*season = strdup(tmp);
+				memset(tmp, 0, 10);
+				snprintf(tmp, 10, "%d", episode_num);
+				*episode = strdup(tmp);
+				season_pos = total_count - 5;
+				episode_pos = total_count - 3;
+			}
+		}
+		else if (!found_year)
+		{
+			int year_num = atoi(tmp);
+			if (year_num > 1900)
+			{
+				found_year = 1;
+				*year = strdup(tmp);
+				year_pos = total_count - 5;
+			}
+		}
+	}
+	else if (digit_count == 3)
+	{
+		if (!found_season && !found_episode)
+		{
+			int episode_num = atoi(&tmp[1]);
+			if (episode_num > 0)
+				tmp[1] = '\0';
+			int season_num = atoi(tmp);
+			if ((season_num > 0) && (episode_num > 0))
+			{
+				found_episode = 1;
+				found_season = 1;
+				*season = strdup(tmp);
+				memset(tmp, 0, 10);
+				snprintf(tmp, 10, "%d", episode_num);
+				*episode = strdup(tmp);
+				season_pos = total_count - 4;
+				episode_pos = total_count - 3;
+			}
+		}
+		else if (!found_episode) // 100+ episodes per season???
+		{
+			int episode_num = atoi(tmp);
+			if (episode_num > 0)
+			{
+				found_episode = 1;
+				*episode = strdup(tmp);
+				episode_pos = total_count - 3;
+			}
+		}
+	}
+	else if ((digit_count > 1) && found_season && !found_episode)
+	{
+		int episode_num = atoi(tmp);
+		if (episode_num > 0)
+		{
+			found_episode = 1;
+			*episode = strdup(tmp);
+			episode_pos = total_count - digit_count;
+		}
+	}
+
+//	DPRINTF(E_DEBUG, L_GENERAL, "Found%s year [%lu], found%s season [%lu], found%s episode [%lu]\n",
+//		found_year ? "" : " no", year_pos, found_season ? "" : " no", season_pos,
+//		found_episode ? "" : " no", episode_pos);
+
+	size_t last = 0;
+	if (found_season)
+		last = season_pos;
+	if (found_episode)
+	{
+		if (last == 0) last = episode_pos;
+		else if (episode_pos < last) last = episode_pos;
+	}
+	if (found_year)
+	{
+		if (last == 0) last = year_pos;
+		else if (year_pos < last) last = year_pos;
+	}
+	if (last > 0)
+	{
+		//DEBUG DPRINTF(E_DEBUG, L_GENERAL, "Last character in name is %lu\n", last);
+		*show_name = malloc(last + 1);
+		memset(*show_name, 0, last + 1);
+		x_strlcpy(*show_name, input, last + 1);
+	}
+
+clean_up:
+	free(work);
 }
 
 /* Code basically stolen from busybox */

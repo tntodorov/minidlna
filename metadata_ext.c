@@ -676,7 +676,7 @@ movie_imgart_cleanup:
 }
 
 int64_t
-search_ext_meta(const char *path, char *name, int64_t detailID, uint8_t **img, int *img_sz)
+search_ext_meta(uint8_t is_tv, const char *path, char *name, int64_t detailID, uint8_t **img, int *img_sz)
 {
 	int64_t result = 0;
 	CURL *fetch = NULL;
@@ -685,6 +685,9 @@ search_ext_meta(const char *path, char *name, int64_t detailID, uint8_t **img, i
 	struct stat file;
 	char *clean_name = NULL;
 	char *year = NULL;
+	char *show = NULL;
+	char *season = NULL;
+	char *episode = NULL;
 
 	metadata_t m_data;
 	uint32_t m_flags = FLAG_MIME|FLAG_DURATION|FLAG_DLNA_PN|FLAG_DATE;
@@ -697,10 +700,6 @@ search_ext_meta(const char *path, char *name, int64_t detailID, uint8_t **img, i
 	if ( stat(path, &file) != 0 )
 		return 0;
 	strip_ext(name);
-	clean_name = cleanup_name(name);
-	year = strip_year(clean_name);
-
-	DPRINTF(E_DEBUG, L_METADATA, "Trying to find online metadata for %s [%s].\n", clean_name, year != NULL ? year : "unknown");
 
 	fetch = curl_easy_init();
 	if (!fetch) goto curl_error;
@@ -714,24 +713,41 @@ search_ext_meta(const char *path, char *name, int64_t detailID, uint8_t **img, i
 
 	curl_easy_setopt(fetch, CURLOPT_WRITEFUNCTION, ext_meta_response);
 
-	result = movie_db_search_movies(fetch, clean_name, year, &m_data, &m_flags);
-	if (result > 0)
+	DPRINTF(E_DEBUG, L_METADATA, "Trying to find online metadata for %s.\n", name);
+
+	if (is_tv)
 	{
-		if (movie_db_get_movie_details(fetch, result, &m_data, &m_flags, &video_poster) == 0)
+		clean_name = cleanup_name(name, "._");
+		split_tv_name(clean_name, &show, &year, &season, &episode);
+		DPRINTF(E_DEBUG, L_METADATA, "Searching for %s - %s - %s:%s.\n", show ? show : "[no name]",
+			year ? year : "[19xx-20xx]", season ? season : "[unknown season]",
+			episode ? episode : "[unknown episode]");
+	}
+	else
+	{
+		clean_name = cleanup_name(name, ".-_");
+		year = strip_year(clean_name);
+
+		result = movie_db_search_movies(fetch, clean_name, year, &m_data, &m_flags);
+		if (result > 0)
 		{
-			DPRINTF(E_DEBUG, L_METADATA, "Received movie poster path %s, and genre(s) %s\n",
-				video_poster != NULL ? video_poster : "[none exists]", m_flags & FLAG_GENRE ? m_data.genre : "[unknown]");
-		}
-		if (movie_db_get_movie_credits(fetch, result, &m_data, &m_flags) == 0)
-		{
-			DPRINTF(E_DEBUG, L_METADATA, "Received movie credits for %s\n", m_data.title);
-		}
-		if (video_poster && strlen(video_poster) && movie_db_get_configuration(fetch, &base_art_url, &art_sz_str) == 0)
-		{
-			/* ready to download the poster image */
-			movie_db_get_imageart(fetch, base_art_url, art_sz_str, video_poster, &m_data.thumb_data, &m_data.thumb_size);
+			if (movie_db_get_movie_details(fetch, result, &m_data, &m_flags, &video_poster) == 0)
+			{
+				DPRINTF(E_DEBUG, L_METADATA, "Received movie poster path %s, and genre(s) %s\n",
+					video_poster != NULL ? video_poster : "[none exists]", m_flags & FLAG_GENRE ? m_data.genre : "[unknown]");
+			}
+			if (movie_db_get_movie_credits(fetch, result, &m_data, &m_flags) == 0)
+			{
+				DPRINTF(E_DEBUG, L_METADATA, "Received movie credits for %s\n", m_data.title);
+			}
+			if (video_poster && strlen(video_poster) && movie_db_get_configuration(fetch, &base_art_url, &art_sz_str) == 0)
+			{
+				/* ready to download the poster image */
+				movie_db_get_imageart(fetch, base_art_url, art_sz_str, video_poster, &m_data.thumb_data, &m_data.thumb_size);
+			}
 		}
 	}
+
 	if (result > 0)
 	{
 		int ret_sql;
@@ -747,17 +763,17 @@ search_ext_meta(const char *path, char *name, int64_t detailID, uint8_t **img, i
 		if (detailID)
 		{
 			ret_sql = sql_exec(db, "UPDATE DETAILS set TITLE = '%q', DATE = %Q, DESCRIPTION = %Q, "
-					   "GENRE = %Q, COMMENT = %Q, ALBUM_ART = %lld, CREATOR = %Q, PUBLISHER = %Q, "
-					   "AUTHOR = %Q, ARTIST = %Q WHERE PATH=%Q and ID=%lld;", m_data.title, m_data.date,
+						   "GENRE = %Q, COMMENT = %Q, ALBUM_ART = %lld, CREATOR = %Q, PUBLISHER = %Q, "
+						   "AUTHOR = %Q, ARTIST = %Q WHERE PATH=%Q and ID=%lld;", m_data.title, m_data.date,
 					   m_data.description, m_data.genre, m_data.comment, img_art, m_data.creator,
 					   m_data.publisher, m_data.author, m_data.artist, path, detailID);
 		}
 		else
 		{
 			ret_sql = sql_exec(db, "INSERT into DETAILS"
-					   " (PATH, SIZE, TIMESTAMP, DATE, TITLE, DESCRIPTION, MIME, COMMENT, GENRE, ALBUM_ART,"
-					   " CREATOR, PUBLISHER, AUTHOR, ARTIST) "
-					   "VALUES (%Q, %lld, %lld, %Q, '%q', %Q, '%q', %Q, %Q, %lld, %Q, %Q, %Q, %Q);",
+						   " (PATH, SIZE, TIMESTAMP, DATE, TITLE, DESCRIPTION, MIME, COMMENT, GENRE, ALBUM_ART,"
+						   " CREATOR, PUBLISHER, AUTHOR, ARTIST) "
+						   "VALUES (%Q, %lld, %lld, %Q, '%q', %Q, '%q', %Q, %Q, %lld, %Q, %Q, %Q, %Q);",
 					   path, (long long)file.st_size, (long long)file.st_mtime,
 					   m_data.date, m_data.title, m_data.description, m_data.mime, m_data.comment,
 					   m_data.genre, img_art, m_data.creator, m_data.publisher, m_data.author, m_data.artist);
@@ -771,6 +787,7 @@ search_ext_meta(const char *path, char *name, int64_t detailID, uint8_t **img, i
 			detailID = sqlite3_last_insert_rowid(db);
 		}
 	}
+
 	result = detailID;
 
 	goto cleanup;
@@ -783,6 +800,9 @@ cleanup:
 	if (fetch) curl_easy_cleanup(fetch);
 	if (year) free(year);
 	if (clean_name) free(clean_name);
+	if (show) free(show);
+	if (season) free(season);
+	if (episode) free(episode);
 	if (base_art_url) free(base_art_url);
 	if (art_sz_str) free(art_sz_str);
 	free_metadata(&m_data, m_flags);

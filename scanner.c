@@ -644,7 +644,7 @@ insert_file(char *name, const char *path, const char *parentID, int object, medi
 		else
 			strcpy(class, "item.videoItem.movie");
 		detailID = GetVideoMetadata(path, name);
-		detailID = search_ext_meta(path, name, detailID, &img_data, &img_data_sz);
+		detailID = search_ext_meta((types & TYPE_TV), path, name, detailID, &img_data, &img_data_sz);
 		if( !detailID )
 			strcpy(name, orig_name);
 	}
