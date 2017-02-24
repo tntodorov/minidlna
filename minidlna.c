@@ -761,6 +761,9 @@ init(int argc, char **argv)
 		case EXTERNAL_MOVIEDB_API_KEY:
 			strncpyt(the_moviedb_api_key, ary_options[i].value, EXTERNAL_SVC_API_KEY_LEN);
 			break;
+		case EXTERNAL_METADATA_IMG_SZ:
+			external_meta_img_sz = atoi(ary_options[i].value);
+			break;
 		default:
 			DPRINTF(E_ERROR, L_GENERAL, "Unknown option in file %s\n",
 				optionsfile);

@@ -62,6 +62,7 @@ enum upnpconfigoptions {
 	EXTERNAL_METADATA,		/* enable search and pulling of metadata from external sources like themoviedb.org */
 	EXTERNAL_STRIP_FROM_NAME,	/* words to strip from media file names before attempting to use them as metadata search keywords */
 	EXTERNAL_MOVIEDB_API_KEY,	/* API key for accessing metadata from the MovieDB.org */
+	EXTERNAL_METADATA_IMG_SZ,	/* max size for external metadata images */
 };
 
 /* readoptionsfile()

@@ -69,6 +69,7 @@ static const struct {
 	{ EXTERNAL_METADATA, "external_meta" },
 	{ EXTERNAL_STRIP_FROM_NAME, "external_meta_strip_words"},
 	{ EXTERNAL_MOVIEDB_API_KEY, "moviedb_api_key" },
+	{ EXTERNAL_METADATA_IMG_SZ, "external_meta_img_sz" },
 };
 
 int

@@ -31,6 +31,7 @@
 #include <libexif/exif-loader.h>
 #include <jpeglib.h>
 #include <setjmp.h>
+#include <time.h>
 #include "libav.h"
 
 #include "upnpglobalvars.h"
@@ -253,6 +254,8 @@ free_metadata(metadata_t *m, uint32_t flags)
 		free(m->duration);
 	if( flags & FLAG_RESOLUTION )
 		free(m->resolution);
+//	if (m->thumb_size)
+//		free(m->thumb_data);
 }
 
 int64_t

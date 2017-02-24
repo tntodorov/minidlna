@@ -173,6 +173,7 @@ check_embedded_art(const char *path, uint8_t *image_data, int image_size)
 
 	if( !image_data || !image_size || !path )
 	{
+		DPRINTF(E_ERROR, L_ARTWORK, "Wrong or missing image data for %s\n", path != NULL?path:"[unknown]");
 		return NULL;
 	}
 	/* If the embedded image matches the embedded image from the last file we
@@ -204,6 +205,7 @@ check_embedded_art(const char *path, uint8_t *image_data, int image_size)
 	}
 	last_hash = hash;
 
+	DPRINTF(E_DEBUG, L_ARTWORK, "Creating new image art file for %s\n", path);
 	imsrc = image_new_from_jpeg(NULL, 0, image_data, image_size, 1, ROTATE_NONE);
 	if( !imsrc )
 	{
@@ -216,6 +218,7 @@ check_embedded_art(const char *path, uint8_t *image_data, int image_size)
 	if( width > 160 || height > 160 )
 	{
 		art_path = save_resized_album_art(imsrc, path);
+		DPRINTF(E_DEBUG, L_ARTWORK, "Saved resized image art file to %s\n", art_path);
 	}
 	else if( width > 0 && height > 0 )
 	{
@@ -243,6 +246,7 @@ check_embedded_art(const char *path, uint8_t *image_data, int image_size)
 			art_path = NULL;
 			goto end_art;
 		}
+		DPRINTF(E_DEBUG, L_ARTWORK, "Saved original image art file to %s\n", art_path);
 	}
 end_art:
 	image_free(imsrc);
@@ -352,7 +356,7 @@ find_album_art(const char *path, uint8_t *image_data, int image_size)
 	int64_t ret = 0;
 
 	if( (image_size && (album_art = check_embedded_art(path, image_data, image_size))) ||
-	    (album_art = check_for_album_file(path)) )
+		(album_art = check_for_album_file(path)) )
 	{
 		ret = sql_get_int_field(db, "SELECT ID from ALBUM_ART where PATH = '%q'", album_art);
 		if( !ret )

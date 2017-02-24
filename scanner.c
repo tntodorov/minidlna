@@ -169,11 +169,11 @@ insert_containers_for_video(const char *name, const char *refID, const char *cla
 	struct genre_s *genre_tok = NULL;
 	static struct genre_virtual_item *genre_list = NULL;
 
-	DPRINTF(L_METADATA, E_DEBUG, "Processing the containers for %s [ref %s][%s][detail ID %lld]\n", name, refID, class, detailID);
+	DPRINTF(E_DEBUG, L_METADATA, "Processing the containers for %s [ref %s][%s][detail ID %ld]\n", name, refID, class, detailID);
 
 	if (genres_str && strlen(genres_str))
 	{
-		DPRINTF(L_METADATA, E_DEBUG, "Processing the following genre(s) %s\n", genres_str);
+		DPRINTF(E_DEBUG, L_METADATA, "Processing the following genre(s) %s\n", genres_str);
 		char *string, *word;
 		for (string = genres_str; (word = strtok(string, "|")); string = NULL)
 		{
@@ -213,6 +213,7 @@ insert_containers_for_video(const char *name, const char *refID, const char *cla
 			struct genre_s *the_genre;
 			for (the_genre = genre_tok; the_genre != NULL; the_genre = the_genre->next)
 			{
+				DPRINTF(E_DEBUG, L_METADATA, "Checking genre container for %s.\n", the_genre->name);
 				must_create = true;
 				for (last_movie_genre = genre_list; last_movie_genre != NULL; last_movie_genre = last_movie_genre->next)
 				{
@@ -621,6 +622,8 @@ insert_file(char *name, const char *path, const char *parentID, int object, medi
 	char *typedir_parentID;
 	char *baseid;
 	char *orig_name = NULL;
+	uint8_t *img_data = NULL;
+	int img_data_sz = 0;
 
 	if( (types & TYPE_IMAGES) && is_image(name) )
 	{
@@ -641,7 +644,7 @@ insert_file(char *name, const char *path, const char *parentID, int object, medi
 		else
 			strcpy(class, "item.videoItem.movie");
 		detailID = GetVideoMetadata(path, name);
-		detailID = search_ext_meta(path, name, detailID);
+		detailID = search_ext_meta(path, name, detailID, &img_data, &img_data_sz);
 		if( !detailID )
 			strcpy(name, orig_name);
 	}
@@ -691,6 +694,13 @@ insert_file(char *name, const char *path, const char *parentID, int object, medi
 	             base, parentID, object, base, parentID, objectID, class, detailID, name);
 
 	insert_containers(name, path, objectID, class, detailID);
+	if (img_data_sz && img_data)
+	{
+		int64_t img_art = find_album_art(path, img_data, img_data_sz);
+		sql_exec(db, "UPDATE DETAILS set ALBUM_ART = %lld "
+			 "WHERE PATH=%Q and ID=%lld;", img_art, path, detailID);
+		free(img_data);
+	}
 	return 0;
 }
 
