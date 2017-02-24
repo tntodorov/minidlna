@@ -233,5 +233,6 @@ extern volatile short int quitting;
 extern volatile uint32_t updateID;
 extern const char *force_sort_criteria;
 extern short int external_meta_img_sz;
+extern short int max_distinct_elements_returned;
 
 #endif

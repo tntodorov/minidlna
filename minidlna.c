@@ -764,6 +764,9 @@ init(int argc, char **argv)
 		case EXTERNAL_METADATA_IMG_SZ:
 			external_meta_img_sz = atoi(ary_options[i].value);
 			break;
+		case MAX_NUM_ELEMENTS_RETURNED:
+			max_distinct_elements_returned = atoi(ary_options[i].value);
+			break;
 		default:
 			DPRINTF(E_ERROR, L_GENERAL, "Unknown option in file %s\n",
 				optionsfile);

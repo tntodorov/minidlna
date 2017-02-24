@@ -63,6 +63,7 @@ enum upnpconfigoptions {
 	EXTERNAL_STRIP_FROM_NAME,	/* words to strip from media file names before attempting to use them as metadata search keywords */
 	EXTERNAL_MOVIEDB_API_KEY,	/* API key for accessing metadata from the MovieDB.org */
 	EXTERNAL_METADATA_IMG_SZ,	/* max size for external metadata images */
+	MAX_NUM_ELEMENTS_RETURNED,	/* max number of elements to return to caller (e.g. artists, actors, directors, producers, genres, etc.) */
 };
 
 /* readoptionsfile()

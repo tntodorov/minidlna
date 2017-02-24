@@ -92,3 +92,4 @@ volatile short int quitting = 0;
 volatile uint32_t updateID = 0;
 const char *force_sort_criteria = NULL;
 short int external_meta_img_sz = 0;
+short int max_distinct_elements_returned = 5;

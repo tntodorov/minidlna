@@ -810,12 +810,12 @@ append_multiple_from_separated_string(struct string_s *str, const char *value, c
 	int ret = 0, counter;
 	char *cpy_val = strdup(value);
 	char *pch;
-	for (pch = strrchr(cpy_val, separator), counter = 0; pch != NULL && counter < 5; pch = strrchr(cpy_val, separator), counter++)
+	for (pch = strrchr(cpy_val, separator), counter = 0; pch != NULL && counter < max_distinct_elements_returned; pch = strrchr(cpy_val, separator), counter++)
 	{
 		ret += strcatf(str, "&lt;%s&gt;%s&lt;/%s&gt;", elementName, pch+1, elementName);
 		*pch = '\0';
 	}
-	if (counter == 0)
+	if (counter < max_distinct_elements_returned)
 	{
 		ret += strcatf(str, "&lt;%s&gt;%s&lt;/%s&gt;", elementName, cpy_val, elementName);
 	}
@@ -1027,7 +1027,7 @@ callback(void *args, int argc, char **argv, char **azColName)
 				ret = append_multiple_from_separated_string(str, artist, "upnp:actor", ',');
 			}
 			if( passed_args->filter & FILTER_UPNP_ARTIST ) {
-				ret = append(str, artist, "upnp:artist");
+				ret = append_multiple_from_separated_string(str, artist, "upnp:artist", ',');
 			}
 		}
 		if( album && (passed_args->filter & FILTER_UPNP_ALBUM) ) {

@@ -1,13 +1,16 @@
 //
 // Created by ttodorov on 2/22/17.
 //
-#include <curl/curl.h>
+#include "config.h"
+
 #include <stdbool.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <stdlib.h>
-#include <jansson.h>
+#include <stdio.h>
 #include <ctype.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <jansson.h>
+#include <curl/curl.h>
 #include "upnpglobalvars.h"
 #include "log.h"
 #include "metadata.h"
@@ -17,11 +20,14 @@
 #include "image_utils.h"
 #include "albumart.h"
 
-#define URL_FETCH_BUFFER_SZ        	4096
-#define URL_IMG_BUFFER_SZ               1048576 // 1MB
+#define URL_SMALL_BUFFER_SZ        	16384   // 16 KB
+#define URL_MEDIUM_BUFFER_SZ		65536   // 65 KB
+#define URL_BIG_BUFFER_SZ		262144  // 256 KB
+#define URL_HUGE_BUFFER_SZ              524288  // 512 KB
 
 #define URL_MOVIE_DB_SEARCH_MOVIES	"https://api.themoviedb.org/3/search/movie?api_key=%s&query=%s"
 #define URL_MOVIE_DB_DETAIL_MOVIES	"https://api.themoviedb.org/3/movie/%ld?api_key=%s"
+#define URL_MOVIE_DB_CREDIT_MOVIES	"https://api.themoviedb.org/3/movie/%ld/credits?api_key=%s"
 #define URL_MOVIE_DB_IMGART_MOVIES	"%s%s%s?api_key=%s"
 #define URL_MOVIE_DB_SEARCH_TVSHOW	"https://api.themoviedb.org/3/search/tv?api_key=%s&query=%s"
 #define URL_MOVIE_DB_QUERY_WITH_YEAR    "%s&year=%s"
@@ -82,7 +88,7 @@ ext_meta_response(void *ptr, size_t size, size_t nmemb, void *stream)
 }
 
 static int64_t
-movie_db_search_movies(const char *search_crit, const char *year, CURL *conn, metadata_t *meta, uint32_t *metaflags)
+movie_db_search_movies(CURL *conn, const char *search_crit, const char *year, metadata_t *meta, uint32_t *metaflags)
 {
 	CURLcode fetch_status;
 	long http_resp_code;
@@ -95,13 +101,13 @@ movie_db_search_movies(const char *search_crit, const char *year, CURL *conn, me
 
 	memset(query, 0, sizeof(query));
 
-	http_data = malloc(URL_FETCH_BUFFER_SZ);
+	http_data = malloc(URL_SMALL_BUFFER_SZ);
 	if (!http_data)
 		return -1;
 	struct http_response write_response = {
 		.data = http_data,
 		.pos = 0,
-		.max_size = URL_FETCH_BUFFER_SZ
+		.max_size = URL_SMALL_BUFFER_SZ
 	};
 	curl_easy_setopt(conn, CURLOPT_WRITEDATA, &write_response);
 
@@ -201,7 +207,7 @@ movie_search_cleanup:
 }
 
 static int64_t
-movie_db_get_movie_details(int64_t movie_id, CURL *conn, metadata_t *meta, uint32_t *metaflags, char **artwork_path)
+movie_db_get_movie_details(CURL *conn, int64_t movie_id, metadata_t *meta, uint32_t *metaflags, char **artwork_path)
 {
 	CURLcode fetch_status;
 	long http_resp_code;
@@ -215,13 +221,13 @@ movie_db_get_movie_details(int64_t movie_id, CURL *conn, metadata_t *meta, uint3
 	memset(query, 0, sizeof(query));
 	memset(helper, 0, sizeof(helper));
 
-	http_data = malloc(URL_FETCH_BUFFER_SZ);
+	http_data = malloc(URL_SMALL_BUFFER_SZ);
 	if (!http_data)
 		return -1;
 	struct http_response write_response = {
 		.data = http_data,
 		.pos = 0,
-		.max_size = URL_FETCH_BUFFER_SZ
+		.max_size = URL_SMALL_BUFFER_SZ
 	};
 	curl_easy_setopt(conn, CURLOPT_WRITEDATA, &write_response);
 
@@ -319,6 +325,162 @@ movie_detail_cleanup:
 }
 
 static int64_t
+movie_db_get_movie_credits(CURL *conn, int64_t movie_id, metadata_t *meta, uint32_t *metaflags)
+{
+	CURLcode fetch_status;
+	long http_resp_code;
+	char *http_data = NULL;
+	char query[MAXPATHLEN];
+	int64_t ret = 0;
+	json_t *js_root = NULL;
+	json_error_t js_err;
+	char helper[64];
+
+	memset(query, 0, sizeof(query));
+	memset(helper, 0, sizeof(helper));
+
+	http_data = malloc(URL_MEDIUM_BUFFER_SZ);
+	if (!http_data)
+		return -1;
+	struct http_response write_response = {
+		.data = http_data,
+		.pos = 0,
+		.max_size = URL_MEDIUM_BUFFER_SZ
+	};
+	curl_easy_setopt(conn, CURLOPT_WRITEDATA, &write_response);
+
+	/* compile query */
+	snprintf(query, MAXPATHLEN, URL_MOVIE_DB_CREDIT_MOVIES, movie_id, the_moviedb_api_key);
+	DPRINTF(E_DEBUG, L_HTTP, "External metadata credits URL: %s\n", query);
+	curl_easy_setopt(conn, CURLOPT_URL, query);
+
+	fetch_status = curl_easy_perform(conn);
+	if (fetch_status != CURLE_OK)
+	{
+		DPRINTF(E_ERROR, L_HTTP, "External metadata credits error: %s\n", curl_easy_strerror(fetch_status));
+		ret = -2;
+		goto movie_credits_error;
+	}
+	curl_easy_getinfo(conn, CURLINFO_RESPONSE_CODE, &http_resp_code);
+	if (http_resp_code != 200)
+	{
+		DPRINTF(E_WARN, L_HTTP, "External metadata credits response: %ld\n", http_resp_code);
+	}
+	http_data[write_response.pos] = '\0';
+	DPRINTF(E_DEBUG, L_METADATA, "External metadata credits response: %s\n", http_data);
+
+	js_root = json_loads(http_data, 0, &js_err);
+	if (!js_root)
+	{
+		DPRINTF(E_ERROR, L_METADATA, "JSON conversion failed: [%d] %s\n", js_err.line, js_err.text);
+		ret = -3;
+		goto movie_credits_error;
+	}
+	if (!json_is_object(js_root))
+	{
+		ret = -3;
+		goto movie_credits_error;
+	}
+
+	json_t *cast = json_object_get(js_root, "cast");
+	if (json_is_array(cast))
+	{
+		char movie_cast[1024] = {0};
+		int cast_total = json_array_size(cast);
+		for (int current = 0; current < cast_total; current++)
+		{
+			json_t *actor = json_array_get(cast, current);
+			json_t *actor_name = json_object_get(actor, "name");
+			if (json_is_string(actor_name))
+			{
+				x_strlcat(movie_cast, json_string_value(actor_name), 1024);
+				x_strlcat(movie_cast, ",", 1024);
+			}
+		}
+		movie_cast[1023] = '\0';
+		/* do not end with a comma */
+		size_t len = strlen(movie_cast);
+		if (len > 0)
+		{
+			if (movie_cast[len-1] == ',')
+				movie_cast[len-1] = '\0';
+			meta->artist = strdup(movie_cast);
+			*metaflags |= FLAG_ARTIST;
+		}
+	}
+	json_t *crew = json_object_get(js_root, "crew");
+	if (json_is_array(crew))
+	{
+		char movie_producers[255] = {0};
+		char movie_directors[255] = {0};
+		char movie_writers[255] = {0};
+		int crew_total = json_array_size(crew);
+		for (int next = 0; next < crew_total; next++)
+		{
+			json_t *contrib = json_array_get(crew, next);
+			json_t *contrib_name = json_object_get(contrib, "name");
+			json_t *job = json_object_get(contrib, "department");
+			if (json_is_string(contrib_name) && json_is_string(job))
+			{
+				if (strcasestr(json_string_value(job), "Directing"))
+				{
+					x_strlcat(movie_directors, json_string_value(contrib_name), 255);
+					x_strlcat(movie_directors, ",", 255);
+				}
+				else if (strcasestr(json_string_value(job), "Writing"))
+				{
+					x_strlcat(movie_writers, json_string_value(contrib_name), 255);
+					x_strlcat(movie_writers, ",", 255);
+				}
+				else if (strcasestr(json_string_value(job), "Production"))
+				{
+					x_strlcat(movie_producers, json_string_value(contrib_name), 255);
+					x_strlcat(movie_producers, ",", 255);
+				}
+			}
+		}
+		movie_producers[254] = '\0';
+		movie_directors[254] = '\0';
+		movie_writers[254] = '\0';
+		/* do not end with a comma */
+		size_t len = strlen(movie_producers);
+		if (len > 0)
+		{
+			if (movie_producers[len-1] == ',')
+				movie_producers[len-1] = '\0';
+			meta->publisher = strdup(movie_producers);
+			*metaflags |= FLAG_PUBLISHER;
+		}
+		len = strlen(movie_directors);
+		if (len > 0)
+		{
+			if (movie_directors[len-1] == ',')
+				movie_directors[len-1] = '\0';
+			meta->creator = strdup(movie_directors);
+			*metaflags |= FLAG_CREATOR;
+		}
+		len = strlen(movie_writers);
+		if (len > 0)
+		{
+			if (movie_writers[len-1] == ',')
+				movie_writers[len-1] = '\0';
+			meta->author = strdup(movie_writers);
+			*metaflags |= FLAG_AUTHOR;
+		}
+	}
+
+	goto movie_credits_cleanup;
+
+movie_credits_error:
+	DPRINTF(E_ERROR, L_METADATA, "Failed to parse external metadata response.\n");
+
+movie_credits_cleanup:
+	if (http_data) free(http_data);
+	if (js_root) json_decref(js_root);
+	return ret;
+}
+
+static int64_t
 movie_db_get_configuration(CURL *conn, char **base_url, char **img_sz)
 {
 	CURLcode fetch_status;
@@ -333,13 +495,13 @@ movie_db_get_configuration(CURL *conn, char **base_url, char **img_sz)
 	memset(query, 0, sizeof(query));
 	memset(helper, 0, sizeof(helper));
 
-	http_data = malloc(URL_FETCH_BUFFER_SZ);
+	http_data = malloc(URL_SMALL_BUFFER_SZ);
 	if (!http_data)
 		return -1;
 	struct http_response write_response = {
 		.data = http_data,
 		.pos = 0,
-		.max_size = URL_FETCH_BUFFER_SZ
+		.max_size = URL_SMALL_BUFFER_SZ
 	};
 	curl_easy_setopt(conn, CURLOPT_WRITEDATA, &write_response);
 
@@ -473,13 +635,13 @@ movie_db_get_imageart(CURL *conn, const char *base_url, const char *img_size_sel
 
 	memset(query, 0, sizeof(query));
 
-	http_data = malloc(URL_IMG_BUFFER_SZ);
+	http_data = malloc(URL_HUGE_BUFFER_SZ);
 	if (!http_data)
 		return -1;
 	struct http_response write_response = {
 		.data = http_data,
 		.pos = 0,
-		.max_size = URL_IMG_BUFFER_SZ
+		.max_size = URL_HUGE_BUFFER_SZ
 	};
 	curl_easy_setopt(conn, CURLOPT_WRITEDATA, &write_response);
 
@@ -552,13 +714,17 @@ search_ext_meta(const char *path, char *name, int64_t detailID, uint8_t **img, i
 
 	curl_easy_setopt(fetch, CURLOPT_WRITEFUNCTION, ext_meta_response);
 
-	result = movie_db_search_movies(clean_name, year, fetch, &m_data, &m_flags);
+	result = movie_db_search_movies(fetch, clean_name, year, &m_data, &m_flags);
 	if (result > 0)
 	{
-		if (movie_db_get_movie_details(result, fetch, &m_data, &m_flags, &video_poster) == 0)
+		if (movie_db_get_movie_details(fetch, result, &m_data, &m_flags, &video_poster) == 0)
 		{
 			DPRINTF(E_DEBUG, L_METADATA, "Received movie poster path %s, and genre(s) %s\n",
 				video_poster != NULL ? video_poster : "[none exists]", m_flags & FLAG_GENRE ? m_data.genre : "[unknown]");
+		}
+		if (movie_db_get_movie_credits(fetch, result, &m_data, &m_flags) == 0)
+		{
+			DPRINTF(E_DEBUG, L_METADATA, "Received movie credits for %s\n", m_data.title);
 		}
 		if (video_poster && strlen(video_poster) && movie_db_get_configuration(fetch, &base_art_url, &art_sz_str) == 0)
 		{
@@ -581,18 +747,20 @@ search_ext_meta(const char *path, char *name, int64_t detailID, uint8_t **img, i
 		if (detailID)
 		{
 			ret_sql = sql_exec(db, "UPDATE DETAILS set TITLE = '%q', DATE = %Q, DESCRIPTION = %Q, "
-					   "GENRE = %Q, COMMENT = %Q, ALBUM_ART = %lld "
-					   "WHERE PATH=%Q and ID=%lld;", m_data.title, m_data.date, m_data.description,
-					   m_data.genre, m_data.comment, img_art, path, detailID);
+					   "GENRE = %Q, COMMENT = %Q, ALBUM_ART = %lld, CREATOR = %Q, PUBLISHER = %Q, "
+					   "AUTHOR = %Q, ARTIST = %Q WHERE PATH=%Q and ID=%lld;", m_data.title, m_data.date,
+					   m_data.description, m_data.genre, m_data.comment, img_art, m_data.creator,
+					   m_data.publisher, m_data.author, m_data.artist, path, detailID);
 		}
 		else
 		{
 			ret_sql = sql_exec(db, "INSERT into DETAILS"
-					   " (PATH, SIZE, TIMESTAMP, DATE, TITLE, DESCRIPTION, MIME, COMMENT, GENRE, ALBUM_ART) "
-					   "VALUES (%Q, %lld, %lld, %Q, '%q', %Q, '%q', %Q, %Q, %lld);",
+					   " (PATH, SIZE, TIMESTAMP, DATE, TITLE, DESCRIPTION, MIME, COMMENT, GENRE, ALBUM_ART,"
+					   " CREATOR, PUBLISHER, AUTHOR, ARTIST) "
+					   "VALUES (%Q, %lld, %lld, %Q, '%q', %Q, '%q', %Q, %Q, %lld, %Q, %Q, %Q, %Q);",
 					   path, (long long)file.st_size, (long long)file.st_mtime,
-					   m_data.date, m_data.title, m_data.description, m_data.mime,
-					   m_data.comment, m_data.genre, img_art);
+					   m_data.date, m_data.title, m_data.description, m_data.mime, m_data.comment,
+					   m_data.genre, img_art, m_data.creator, m_data.publisher, m_data.author, m_data.artist);
 		}
 		if( ret_sql != SQLITE_OK )
 		{
