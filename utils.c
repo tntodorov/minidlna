@@ -350,8 +350,9 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 {
 	char *work = NULL;
 	int found_season = 0, found_episode = 0, found_year = 0;
-	size_t season_pos = 0, episode_pos = 0, year_pos = 0;
+	size_t season_pos = 0, episode_pos = 0, year_pos = 0, bkp_pos = 0;
 	char tmp[10] = { 0 };
+	char *bkp = NULL;
 	uint8_t digit_count = 0;
 	size_t total_count = 0;
 	enum char_type_e previous = CHARACTER;
@@ -383,6 +384,13 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 				{
 					if (!found_year)
 					{
+						if (!found_season && !found_episode)
+						{
+							bkp = malloc(5);
+							memset(bkp, 0, 5);
+							memcpy(bkp, tmp, 4);
+							bkp_pos = total_count;
+						}
 						int year_num = atoi(tmp);
 						if (year_num > 1900)
 						{
@@ -485,6 +493,12 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 
 		total_count++;
 	}
+	/* if there are no more numbers, but we found an year, that's probably the season and episode... */
+	if (digit_count == 0 && found_year && !found_season && !found_episode && bkp != NULL)
+	{
+		memcpy(tmp, bkp, 4);
+		total_count = bkp_pos;
+	}
 	/* ... if the input ends with a number ... */
 	if (digit_count == 4)
 	{
@@ -586,6 +600,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 
 clean_up:
 	free(work);
+	if (bkp) free(bkp);
 }
 
 /* Code basically stolen from busybox */
