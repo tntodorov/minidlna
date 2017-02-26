@@ -24,28 +24,49 @@
 #ifndef __METADATA_H__
 #define __METADATA_H__
 
-#define FLAG_TITLE	 0x00000001
-#define FLAG_ARTIST	 0x00000002
-#define FLAG_ALBUM	 0x00000004
-#define FLAG_GENRE	 0x00000008
-#define FLAG_COMMENT	 0x00000010
-#define FLAG_CREATOR	 0x00000020
-#define FLAG_DATE	 0x00000040
-#define FLAG_DLNA_PN	 0x00000080
-#define FLAG_MIME	 0x00000100
-#define FLAG_DURATION	 0x00000200
-#define FLAG_RESOLUTION	 0x00000400
-#define FLAG_DESCRIPTION 0x00000800
-#define FLAG_RATING      0x00001000
-#define FLAG_AUTHOR      0x00002000
-#define FLAG_TRACK       0x00004000
-#define FLAG_DISC        0x00008000
-#define FLAG_PUBLISHER   0x00010000
+#define FLAG_TITLE	        0x00000001
+#define FLAG_ARTIST	        0x00000002
+#define FLAG_ALBUM	        0x00000004
+#define FLAG_GENRE	        0x00000008
+#define FLAG_COMMENT	        0x00000010
+#define FLAG_CREATOR	        0x00000020
+#define FLAG_DATE	        0x00000040
+#define FLAG_DLNA_PN	        0x00000080
+#define FLAG_MIME	        0x00000100
+#define FLAG_DURATION	        0x00000200
+#define FLAG_RESOLUTION	        0x00000400
+#define FLAG_DESCRIPTION        0x00000800
+#define FLAG_RATING             0x00001000
+#define FLAG_AUTHOR             0x00002000
+#define FLAG_TRACK              0x00004000
+#define FLAG_DISC               0x00008000
+#define FLAG_PUBLISHER          0x00010000
+#define FLAG_SUBTITLE           0x00020000
+#define FLAG_ORIG_TITLE         0x00040000
+#define FLAG_ORIG_COMMENT       0x00080000
+#define FLAG_ORIG_DESCRIPTION   0x00100000
+#define FLAG_ORIG_DATE          0x00200000
+#define FLAG_ORIG_RATING        0x00400000
+#define FLAG_ORIG_TRACK         0x00800000
+#define FLAG_ORIG_DISC          0x01000000
 
-#define ALL_FLAGS        0xFFFFFFFF
+#define ALL_FLAGS               0xFFFFFFFF
+
+#define FLAG_ART_TYPE_POSTER    0x01
+#define FLAG_ART_TYPE_BACKDROP  0x02
+#define FLAG_ART_TYPE_STILL     0x04
+#define FLAG_ART_TYPE_ANY       FLAG_ART_TYPE_POSTER|FLAG_ART_TYPE_BACKDROP|FLAG_ART_TYPE_STILL
+
+typedef struct artwork_s {
+	uint8_t  thumb_type;
+	uint8_t *thumb_data;
+	size_t   thumb_size;
+	struct artwork_s *next;
+} artwork_t;
 
 typedef struct metadata_s {
 	char *       title;
+	char *       subtitle;
 	char *       artist;
 	char *       creator;
 	char *       publisher;
@@ -66,8 +87,14 @@ typedef struct metadata_s {
 	char *       date;
 	char *       mime;
 	char *       dlna_pn;
-	int          thumb_size;
-	uint8_t *    thumb_data;
+	char *       original_title;
+	char *       original_comment;
+	char *       original_description;
+	char *       original_date;
+	char *       original_rating;
+	unsigned int original_disc;
+	unsigned int original_track;
+	artwork_t *  artwork;
 } metadata_t;
 
 typedef enum {
@@ -126,4 +153,7 @@ GetVideoMetadata(const char *path, char *name);
 
 void
 free_metadata(metadata_t *m, uint32_t flags);
+
+void
+free_metadata_artwork(metadata_t *m);
 #endif

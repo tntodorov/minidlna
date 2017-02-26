@@ -226,6 +226,8 @@ free_metadata(metadata_t *m, uint32_t flags)
 {
 	if( flags & FLAG_TITLE )
 		free(m->title);
+	if( flags & FLAG_SUBTITLE )
+		free(m->subtitle);
 	if( flags & FLAG_ARTIST )
 		free(m->artist);
 	if( flags & FLAG_ALBUM )
@@ -256,6 +258,34 @@ free_metadata(metadata_t *m, uint32_t flags)
 		free(m->resolution);
 //	if (m->thumb_size)
 //		free(m->thumb_data);
+	if( flags & FLAG_ORIG_TITLE )
+		free(m->original_title);
+	if( flags & FLAG_ORIG_COMMENT )
+		free(m->original_comment);
+	if( flags & FLAG_ORIG_DESCRIPTION )
+		free(m->original_description);
+	if( flags & FLAG_ORIG_DATE )
+		free(m->original_date);
+	if( flags & FLAG_ORIG_RATING )
+		free(m->original_rating);
+}
+
+void
+free_metadata_artwork(metadata_t *m)
+{
+	if (m == NULL || m->artwork == NULL)
+		return;
+
+	artwork_t *next, *art = m->artwork;
+	while (art)
+	{
+		next = art->next;
+		if (art->thumb_size > 0 && art->thumb_data)
+			free(art->thumb_data);
+		free(art);
+		art = next;
+	}
+	m->artwork = NULL;
 }
 
 int64_t
@@ -693,6 +723,8 @@ GetVideoMetadata(const char *path, char *name)
 	//dump_format(ctx, 0, NULL, 0);
 	for( i=0; i < ctx->nb_streams; i++)
 	{
+		int thumb_size = 0;
+		uint8_t *thumb_data = NULL;
 		if( lav_codec_type(ctx->streams[i]) == AVMEDIA_TYPE_AUDIO &&
 		    audio_stream == -1 )
 		{
@@ -701,12 +733,27 @@ GetVideoMetadata(const char *path, char *name)
 			continue;
 		}
 		else if( lav_codec_type(ctx->streams[i]) == AVMEDIA_TYPE_VIDEO &&
-		         !lav_is_thumbnail_stream(ctx->streams[i], &m.thumb_data, &m.thumb_size) &&
+		         !lav_is_thumbnail_stream(ctx->streams[i], &thumb_data, &thumb_size) &&
 		         video_stream == -1 )
 		{
 			video_stream = i;
 			vstream = ctx->streams[video_stream];
 			continue;
+		}
+		if (thumb_size > 0 && thumb_data)
+		{
+			artwork_t *thumb = calloc(1, sizeof(artwork_t));
+			thumb->thumb_data = thumb_data;
+			thumb->thumb_size = thumb_size;
+			thumb->thumb_type = FLAG_ART_TYPE_ANY;
+			if (m.artwork)
+			{
+				artwork_t *art = m.artwork;
+				while (art->next)
+					art = art->next;
+				art->next = thumb;
+			}
+			else m.artwork = thumb;
 		}
 	}
 	path_cpy = strdup(path);
@@ -1447,10 +1494,13 @@ GetVideoMetadata(const char *path, char *name)
 				m.creator = m.artist;
 				free_flags &= ~FLAG_CREATOR;
 			}
-			if (!m.thumb_data)
+			if (!m.artwork && video.image != NULL && video.image_size > 0)
 			{
-				m.thumb_data = video.image;
-				m.thumb_size = video.image_size;
+				artwork_t *art = calloc(1, sizeof(artwork_t));
+				art->thumb_data = video.image;
+				art->thumb_size = video.image_size;
+				art->thumb_type = FLAG_ART_TYPE_ANY;
+				m.artwork = art;
 			}
 		}
 	}
@@ -1536,7 +1586,16 @@ video_no_dlna:
 	if( !m.title )
 		m.title = strdup(name);
 
-	album_art = find_album_art(path, m.thumb_data, m.thumb_size);
+	// TODO: how to extend this to deal with the possibility of multiple images?
+	if (m.artwork)
+	{
+		uint8_t *img = malloc(m.artwork->thumb_size);
+		if (img)
+		{
+			memcpy(img, m.artwork->thumb_data, m.artwork->thumb_size);
+			album_art = find_album_art(path, img, m.artwork->thumb_size);
+		}
+	}
 	freetags(&video);
 	lav_close(ctx);
 
@@ -1560,6 +1619,7 @@ video_no_dlna:
 		check_for_captions(path, ret);
 	}
 	free_metadata(&m, free_flags);
+	free_metadata_artwork(&m);
 	free(path_cpy);
 
 	return ret;

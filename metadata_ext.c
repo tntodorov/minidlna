@@ -26,8 +26,8 @@ typedef long long i64;
 
 #define URL_SMALL_BUFFER_SZ        	16384   // 16 KB
 #define URL_MEDIUM_BUFFER_SZ		65536   // 65 KB
-#define URL_BIG_BUFFER_SZ		262144  // 256 KB
-#define URL_HUGE_BUFFER_SZ              524288  // 512 KB
+#define URL_BIG_BUFFER_SZ		524288  // 512 KB
+#define URL_HUGE_BUFFER_SZ              1048576 // 1 MB
 
 #define URL_MOVIE_DB_SEARCH_MOVIES	"https://api.themoviedb.org/3/search/movie?api_key=%s&query=%s"
 #define URL_MOVIE_DB_SEARCH_MOVIES_YEAR "%s&year=%s"
@@ -37,6 +37,7 @@ typedef long long i64;
 #define URL_MOVIE_DB_SEARCH_TVSHOW	"https://api.themoviedb.org/3/search/tv?api_key=%s&query=%s"
 #define URL_MOVIE_DB_SEARCH_TVSHOW_YEAR "%s&first_air_date_year=%s"
 #define URL_MOVIE_DB_SEARCH_NEXT_PAGE	"%s&page=%lld"
+#define URL_MOVIE_DB_DETAIL_TVSHOW	"https://api.themoviedb.org/3/tv/%ld?api_key=%s"
 #define URL_MOVIE_DB_CONFIGURATION	"https://api.themoviedb.org/3/configuration?api_key=%s"
 
 struct http_response
@@ -290,12 +291,20 @@ movie_db_search_tv(CURL *conn, const char *full_search, const char *show_search,
 		if (show_search && strlen(show_search))
 		{
 			if (strcasecmp(show_search, last_show_found) == 0)
+			{
+				DPRINTF(E_DEBUG, L_METADATA, "Reusing a previously found show %s which matches search criteria %s\n",
+					last_show_found, show_search);
 				goto tv_search_process;
+			}
 		}
 		else if (full_search && strlen(full_search))
 		{
 			if (strcasestr(full_search, last_show_found) != NULL)
+			{
+				DPRINTF(E_DEBUG, L_METADATA, "Reusing a previously found show %s which matches search criteria %s\n",
+					last_show_found, full_search);
 				goto tv_search_process;
+			}
 		}
 	}
 
@@ -639,11 +648,12 @@ tv_search_request:
 
 tv_search_process:
 	DPRINTF(E_DEBUG, L_METADATA, "Found a matching show: %s [%s]\n", last_show_found, last_show_year ? last_show_year : "unknown year");
-	meta_data->title = strdup(last_show_found);
-	*meta_flags |= FLAG_TITLE;
+	meta_data->original_title = strdup(last_show_found);
+	*meta_flags |= FLAG_ORIG_TITLE;
 	if (last_show_year)
 	{
-		// TODO: add original date to SQL table to be able to handle the first air date of the show vs the actual air date of the episode
+		meta_data->original_date = strdup(last_show_year);
+		*meta_flags |= FLAG_ORIG_DATE;
 	}
 	ret = last_show_id;
 	goto tv_search_cleanup;
@@ -659,7 +669,7 @@ tv_search_cleanup:
 }
 
 static int64_t
-movie_db_get_movie_details(CURL *conn, int64_t movie_id, metadata_t *meta, uint32_t *metaflags, char **artwork_path)
+movie_db_get_movie_details(CURL *conn, int64_t movie_id, metadata_t *meta, uint32_t *metaflags, struct album_art_name_s **artwork)
 {
 	CURLcode fetch_status;
 	long http_resp_code;
@@ -763,7 +773,32 @@ http_movie_details_request:
 	object = json_object_get(js_root, "poster_path");
 	if (json_is_string(object))
 	{
-		*artwork_path = strdup(json_string_value(object));
+		struct album_art_name_s *art = calloc(1, sizeof(struct album_art_name_s));
+		art->name = strdup(json_string_value(object));
+		art->wildcard = FLAG_ART_TYPE_POSTER;
+		if (*artwork)
+		{
+			struct album_art_name_s *a = *artwork;
+			while (a->next)
+				a = a->next;
+			a->next = art;
+		}
+		else *artwork = art;
+	}
+	object = json_object_get(js_root, "backdrop_path");
+	if (json_is_string(object))
+	{
+		struct album_art_name_s *art = calloc(1, sizeof(struct album_art_name_s));
+		art->name = strdup(json_string_value(object));
+		art->wildcard = FLAG_ART_TYPE_BACKDROP;
+		if (*artwork)
+		{
+			struct album_art_name_s *a = *artwork;
+			while (a->next)
+				a = a->next;
+			a->next = art;
+		}
+		else *artwork = art;
 	}
 	if (!(*metaflags & FLAG_DATE))
 	{
@@ -781,6 +816,173 @@ movie_detail_error:
 	DPRINTF(E_ERROR, L_METADATA, "Failed to parse external metadata response.\n");
 
 movie_detail_cleanup:
+	if (http_data) free(http_data);
+	if (resp_hdrs) curl_slist_free_all(resp_hdrs);
+	if (js_root) json_decref(js_root);
+	return ret;
+}
+
+static int64_t
+movie_db_get_tv_details(CURL *conn, int64_t show_id, metadata_t *meta, uint32_t *metaflags, char **artwork_path)
+{
+	CURLcode fetch_status;
+	long http_resp_code;
+	char *http_data = NULL;
+	struct curl_slist *resp_hdrs = NULL;
+	char query[MAXPATHLEN];
+	int64_t ret = 0;
+	json_t *js_root = NULL;
+	json_error_t js_err;
+	char helper[64];
+
+	static int64_t last_detail_show_id = 0;
+	static char *last_detail_genres = NULL;
+	static char *last_detail_rating = NULL;
+	static json_int_t last_detail_season_count = 0;
+	static json_int_t last_detail_episode_count = 0;
+
+	if (last_detail_show_id > 0)
+	{
+		if (last_detail_show_id == show_id)
+		{
+			DPRINTF(E_DEBUG, L_METADATA, "Reusing details information from last show [id=%ld].\n", show_id);
+			goto tv_detail_process;
+		}
+		else
+		{
+			last_detail_show_id = 0;
+			last_detail_season_count = 0;
+			last_detail_episode_count = 0;
+			if (last_detail_genres)
+			{
+				free(last_detail_genres);
+				last_detail_genres = NULL;
+			}
+			if (last_detail_rating)
+			{
+				free(last_detail_rating);
+				last_detail_rating = NULL;
+			}
+		}
+	}
+
+	memset(query, 0, sizeof(query));
+	memset(helper, 0, sizeof(helper));
+
+	http_data = malloc(URL_SMALL_BUFFER_SZ);
+	if (!http_data)
+		return 0;
+	struct http_response write_response = {
+		.data = http_data,
+		.pos = 0,
+		.max_size = URL_SMALL_BUFFER_SZ
+	};
+	curl_easy_setopt(conn, CURLOPT_WRITEDATA, &write_response);
+	curl_easy_setopt(conn, CURLOPT_HEADERDATA, resp_hdrs);
+
+	/* compile query */
+	snprintf(query, MAXPATHLEN, URL_MOVIE_DB_DETAIL_TVSHOW, show_id, the_moviedb_api_key);
+	DPRINTF(E_DEBUG, L_HTTP, "External metadata detail URL: %s\n", query);
+	curl_easy_setopt(conn, CURLOPT_URL, query);
+
+http_tv_details_request:
+	resp_hdrs = curl_slist_append(resp_hdrs, ""); // initialize
+	fetch_status = curl_easy_perform(conn);
+	if (fetch_status != CURLE_OK)
+	{
+		DPRINTF(E_ERROR, L_HTTP, "External metadata detail error: %s\n", curl_easy_strerror(fetch_status));
+		goto tv_detail_error;
+	}
+	curl_easy_getinfo(conn, CURLINFO_RESPONSE_CODE, &http_resp_code);
+	if (http_resp_code != 200)
+	{
+		DPRINTF(E_WARN, L_HTTP, "External metadata details response code: %ld\n", http_resp_code);
+		if (http_resp_code == 429)
+		{
+			parse_and_wait_until(resp_hdrs);
+			curl_slist_free_all(resp_hdrs);
+			memset(http_data, 0, write_response.pos);
+			write_response.pos = 0;
+			goto http_tv_details_request;
+		}
+	}
+	http_data[write_response.pos] = '\0';
+	DPRINTF(E_DEBUG, L_METADATA, "External metadata details response: %s\n", http_data);
+
+	js_root = json_loads(http_data, 0, &js_err);
+	if (!js_root)
+	{
+		DPRINTF(E_ERROR, L_METADATA, "JSON conversion failed: [%d] %s\n", js_err.line, js_err.text);
+		goto tv_detail_error;
+	}
+	json_t *genres = json_object_get(js_root, "genres");
+	if (genres && json_is_array(genres) && json_array_size(genres) > 0)
+	{
+		size_t total = json_array_size(genres);
+		char helper[64] = { 0 };
+		for (size_t idx = 0; idx < total; idx++)
+		{
+			json_t *g = json_array_get(genres, idx);
+			if (json_is_string(g))
+			{
+				x_strlcat(helper, json_string_value(g), 64);
+				if (idx < total - 1)
+					x_strlcat(helper, "|", 64);
+			}
+		}
+		// make sure string is terminated and it does not end with separator "|"
+		helper[63] = '\0';
+		size_t len = strlen(helper);
+		if (helper[len - 1] == '|') helper[len - 1] = '\0';
+		if (last_detail_genres && strlen(last_detail_genres))
+			free(last_detail_genres);
+		last_detail_genres = strdup(helper);
+	}
+	json_t *seasons = json_object_get(js_root, "number_of_seasons");
+	if (seasons && json_is_integer(seasons))
+		last_detail_season_count = json_integer_value(seasons);
+	json_t *episodes = json_object_get(js_root, "number_of_episodes");
+	if (episodes && json_is_integer(episodes))
+		last_detail_episode_count = json_integer_value(episodes);
+	json_t *rating = json_object_get(js_root, "vote_average");
+	if (rating && json_is_string(rating) && json_string_length(rating))
+	{
+		size_t len = json_string_length(rating);
+		last_detail_rating = malloc(len + 4); // 1 for string termination + 3 for "/10"
+		memset(last_detail_rating, 0, len + 4);
+		memcpy(last_detail_rating, json_string_value(rating), len);
+		x_strlcat(last_detail_rating, "/10", len + 4);
+	}
+
+
+tv_detail_process:
+	if (last_detail_genres && strlen(last_detail_genres))
+	{
+		meta->genre = strdup(last_detail_genres);
+		*metaflags |= FLAG_GENRE;
+	}
+	if (last_detail_season_count)
+	{
+		meta->original_disc = last_detail_season_count;
+		*metaflags |= FLAG_ORIG_DISC;
+	}
+	if (last_detail_episode_count)
+	{
+		meta->original_track = last_detail_episode_count;
+		*metaflags |= FLAG_ORIG_TRACK;
+	}
+	if (last_detail_rating && strlen(last_detail_rating))
+	{
+		meta->original_rating = strdup(last_detail_rating);
+		*metaflags |= FLAG_ORIG_RATING;
+	}
+	ret = 1;
+	goto tv_detail_cleanup;
+
+tv_detail_error:
+	DPRINTF(E_ERROR, L_METADATA, "Failed to parse external metadata response.\n");
+
+tv_detail_cleanup:
 	if (http_data) free(http_data);
 	if (resp_hdrs) curl_slist_free_all(resp_hdrs);
 	if (js_root) json_decref(js_root);
@@ -955,10 +1157,10 @@ movie_credits_cleanup:
 }
 
 static int64_t
-movie_db_get_configuration(CURL *conn, char **base_url, char **img_sz)
+movie_db_get_configuration(CURL *conn, char **base_url, struct album_art_name_s **art_sizes)
 {
 	static char *last_base_url = NULL;
-	static char *last_img_sz = NULL;
+	static struct album_art_name_s *last_img_sizes = NULL;
 	CURLcode fetch_status;
 	long http_resp_code;
 	char *http_data = NULL;
@@ -969,11 +1171,9 @@ movie_db_get_configuration(CURL *conn, char **base_url, char **img_sz)
 	json_error_t js_err;
 	char helper[64];
 
-	if (last_base_url && strlen(last_base_url) && last_img_sz && strlen(last_img_sz))
+	if (last_base_url && strlen(last_base_url) && last_img_sizes)
 	{
-		*base_url = strdup(last_base_url);
-		*img_sz = strdup(last_img_sz);
-		return 1;
+		goto configuration_process;
 	}
 
 	memset(query, 0, sizeof(query));
@@ -1001,7 +1201,7 @@ make_config_request:
 	if (fetch_status != CURLE_OK)
 	{
 		DPRINTF(E_ERROR, L_HTTP, "External metadata configuration error code: %s\n", curl_easy_strerror(fetch_status));
-		goto movie_configuration_error;
+		goto configuration_error;
 	}
 	curl_easy_getinfo(conn, CURLINFO_RESPONSE_CODE, &http_resp_code);
 	if (http_resp_code != 200)
@@ -1023,93 +1223,120 @@ make_config_request:
 	if (!js_root)
 	{
 		DPRINTF(E_ERROR, L_METADATA, "JSON conversion failed: [%d] %s\n", js_err.line, js_err.text);
-		goto movie_configuration_error;
+		goto configuration_error;
 	}
 	if (!json_is_object(js_root))
 	{
-		goto movie_configuration_error;
+		goto configuration_error;
 	}
 	json_t *images = json_object_get(js_root, "images");
 	if (!json_is_object(images))
 	{
-		goto movie_configuration_error;
+		goto configuration_error;
 	}
 	json_t *object = json_object_get(images, "secure_base_url");
 	if (!json_is_string(object))
 	{
-		goto movie_configuration_error;
+		goto configuration_error;
 	}
 	last_base_url = strdup(json_string_value(object));
 	object = json_object_get(images, "poster_sizes");
-	if (!json_is_array(object))
+	if (json_is_array(object))
 	{
-		object = json_object_get(images, "backdrop_sizes");
-		if (!json_is_array(object))
+		size_t poster_size_count = json_array_size(object);
+		for (size_t next = 0; next < poster_size_count; next++)
 		{
-			goto movie_configuration_error;
-		}
-	}
-	size_t img_sizes_count = json_array_size(object);
-	if (img_sizes_count <= 0)
-	{
-		goto movie_configuration_error;
-	}
-	long last_acceptable = 0;
-	const char *last_selection = NULL;
-	for (size_t current = 0; current < img_sizes_count; current++)
-	{
-		json_t *item = json_array_get(object, current);
-		if (json_is_string(item))
-		{
-			const char *test = json_string_value(item);
-			if (external_meta_img_sz > 0)
+			json_t *sz = json_array_get(object, next);
+			if (sz && json_is_string(sz) && json_string_length(sz))
 			{
-				while (*test != '\0' && isalpha(*test))
-					test++;
-				if (*test != '\0')
+				struct album_art_name_s *art = calloc(1, sizeof(struct album_art_name_s));
+				art->name = strdup(json_string_value(sz));
+				art->wildcard = FLAG_ART_TYPE_POSTER;
+				if (last_img_sizes)
 				{
-					long num = strtol(test, NULL, 10);
-					if (num <= external_meta_img_sz && num > last_acceptable)
-					{
-						last_acceptable = num;
-						last_selection = json_string_value(item);
-					}
-					else
-						break;
+					struct album_art_name_s *a = last_img_sizes;
+					while (a->next)
+						a = a->next;
+					a->next = art;
 				}
-				else
-				{
-					/* we obviously reached a value not convertible to a number
-					 * before the last acceptable value is past the configured
-					 * size, so we should use this (a.k.a 'original' or some
-					 * such size)
-					 */
-					last_selection = json_string_value(item);
-					break;
-				}
-			}
-			else
-			{
-				/* configuration value is not set */
-				last_selection = test;
-				break;
+				else last_img_sizes = art;
 			}
 		}
 	}
-	if (last_selection)
+	object = json_object_get(images, "backdrop_sizes");
+	if (json_is_array(object))
 	{
-		last_img_sz = strdup(last_selection);
-		*base_url = strdup(last_base_url);
-		*img_sz = strdup(last_img_sz);
-		ret = 1;
+		size_t poster_size_count = json_array_size(object);
+		for (size_t next = 0; next < poster_size_count; next++)
+		{
+			json_t *sz = json_array_get(object, next);
+			if (sz && json_is_string(sz) && json_string_length(sz))
+			{
+				struct album_art_name_s *art = calloc(1, sizeof(struct album_art_name_s));
+				art->name = strdup(json_string_value(sz));
+				art->wildcard = FLAG_ART_TYPE_BACKDROP;
+				if (last_img_sizes)
+				{
+					struct album_art_name_s *a = last_img_sizes;
+					while (a->next)
+						a = a->next;
+					a->next = art;
+				}
+				else last_img_sizes = art;
+			}
+		}
+	}
+	object = json_object_get(images, "still_sizes");
+	if (json_is_array(object))
+	{
+		size_t poster_size_count = json_array_size(object);
+		for (size_t next = 0; next < poster_size_count; next++)
+		{
+			json_t *sz = json_array_get(object, next);
+			if (sz && json_is_string(sz) && json_string_length(sz))
+			{
+				struct album_art_name_s *art = calloc(1, sizeof(struct album_art_name_s));
+				art->name = strdup(json_string_value(sz));
+				art->wildcard = FLAG_ART_TYPE_STILL;
+				if (last_img_sizes)
+				{
+					struct album_art_name_s *a = last_img_sizes;
+					while (a->next)
+						a = a->next;
+					a->next = art;
+				}
+				else last_img_sizes = art;
+			}
+		}
 	}
 
-	goto movie_configuration_cleanup;
+configuration_process:
+	*base_url = strdup(last_base_url);
+	struct album_art_name_s *src, *tgt;
+	src = last_img_sizes;
+	while (src)
+	{
+		struct album_art_name_s *art = calloc(1, sizeof(struct album_art_name_s));
+		art->name = strdup(src->name);
+		art->wildcard = src->wildcard;
+		if (*art_sizes)
+		{
+			tgt = *art_sizes;
+			while (tgt->next)
+				tgt = tgt->next;
+			tgt->next = art;
+		}
+		else *art_sizes = art;
+		src = src->next;
+	}
+	ret = 1;
 
-movie_configuration_error:
+	goto configuration_cleanup;
+
+configuration_error:
 	DPRINTF(E_ERROR, L_METADATA, "Failed to parse external metadata response.\n");
 
-movie_configuration_cleanup:
+configuration_cleanup:
 	if (http_data) free(http_data);
 	if (resp_hdrs) curl_slist_free_all(resp_hdrs);
 	if (js_root) json_decref(js_root);
@@ -1117,7 +1344,7 @@ movie_configuration_cleanup:
 }
 
 static size_t
-movie_db_get_imageart(CURL *conn, const char *base_url, const char *img_size_sel, const char *img_path, uint8_t **img, int *img_sz)
+movie_db_get_imageart(CURL *conn, const char *base_url, struct album_art_name_s * const img_size_sel, struct album_art_name_s * const img_art_paths, metadata_t *meta)
 {
 	CURLcode fetch_status;
 	long http_resp_code;
@@ -1125,6 +1352,9 @@ movie_db_get_imageart(CURL *conn, const char *base_url, const char *img_size_sel
 	struct curl_slist *resp_hdrs = NULL;
 	char query[MAXPATHLEN];
 	size_t ret = 0;
+
+	if (img_size_sel == NULL || img_art_paths == NULL || meta == NULL)
+		return ret;
 
 	memset(query, 0, sizeof(query));
 
@@ -1139,39 +1369,72 @@ movie_db_get_imageart(CURL *conn, const char *base_url, const char *img_size_sel
 	curl_easy_setopt(conn, CURLOPT_WRITEDATA, &write_response);
 	curl_easy_setopt(conn, CURLOPT_HEADERDATA, resp_hdrs);
 
-	/* compile query */
-	snprintf(query, MAXPATHLEN, URL_MOVIE_DB_IMGART_MOVIES, base_url, img_size_sel, img_path, the_moviedb_api_key);
-	DPRINTF(E_DEBUG, L_HTTP, "External metadata imageart URL: %s\n", query);
-	curl_easy_setopt(conn, CURLOPT_URL, query);
+	struct album_art_name_s *sizes, *images;
+	int counter = 0;
+	for (sizes = img_size_sel; sizes != NULL; sizes = sizes->next)
+	{
+		for (images = img_art_paths; images != NULL; images = images->next)
+		{
+			if (resp_hdrs)
+			{
+				curl_slist_free_all(resp_hdrs);
+				resp_hdrs = NULL;
+			}
+			if (http_data && write_response.pos)
+			{
+				memset(http_data, 0, write_response.pos);
+			}
+			write_response.pos = 0;
+
+			/* compile query */
+			snprintf(query, MAXPATHLEN, URL_MOVIE_DB_IMGART_MOVIES, base_url, sizes->name, images->name, the_moviedb_api_key);
+			DPRINTF(E_DEBUG, L_HTTP, "External metadata imageart URL: %s\n", query);
+			curl_easy_setopt(conn, CURLOPT_URL, query);
 
 http_movie_imageart_request:
-	resp_hdrs = curl_slist_append(resp_hdrs, ""); // initialize
-	fetch_status = curl_easy_perform(conn);
-	if (fetch_status != CURLE_OK)
-	{
-		DPRINTF(E_ERROR, L_HTTP, "External metadata imageart error: %s\n", curl_easy_strerror(fetch_status));
-		goto movie_imgart_cleanup;
-	}
-	curl_easy_getinfo(conn, CURLINFO_RESPONSE_CODE, &http_resp_code);
-	if (http_resp_code != 200)
-	{
-		DPRINTF(E_WARN, L_HTTP, "External metadata imageart response code: %ld\n", http_resp_code);
-		if (http_resp_code == 429)
-		{
-			parse_and_wait_until(resp_hdrs);
-			curl_slist_free_all(resp_hdrs);
-			memset(http_data, 0, write_response.pos);
-			write_response.pos = 0;
-			goto http_movie_imageart_request;
+			resp_hdrs = curl_slist_append(resp_hdrs, ""); // initialize
+			fetch_status = curl_easy_perform(conn);
+			if (fetch_status != CURLE_OK)
+			{
+				DPRINTF(E_ERROR, L_HTTP, "External metadata imageart error: %s\n", curl_easy_strerror(fetch_status));
+				if (counter == 0) goto movie_imgart_cleanup; // if this is the very first try, then bail
+				else continue; // try next size
+			}
+			curl_easy_getinfo(conn, CURLINFO_RESPONSE_CODE, &http_resp_code);
+			if (http_resp_code != 200)
+			{
+				DPRINTF(E_WARN, L_HTTP, "External metadata imageart response code: %ld\n", http_resp_code);
+				if (http_resp_code == 429)
+				{
+					parse_and_wait_until(resp_hdrs);
+					curl_slist_free_all(resp_hdrs);
+					memset(http_data, 0, write_response.pos);
+					write_response.pos = 0;
+					goto http_movie_imageart_request;
+				}
+			}
+			counter++;
+			DPRINTF(E_DEBUG, L_HTTP, "Retrieved %ld bytes image art\n", write_response.pos);
+			if (write_response.pos)
+			{
+				artwork_t *next_img = calloc(1, sizeof(artwork_t));
+				next_img->thumb_type = sizes->wildcard;
+				next_img->thumb_size = write_response.pos;
+				next_img->thumb_data = malloc(write_response.pos);
+				if (!next_img->thumb_data)
+					goto movie_imgart_cleanup;
+				memcpy(next_img->thumb_data, http_data, write_response.pos);
+				if (meta->artwork)
+				{
+					artwork_t *n = meta->artwork;
+					while (n->next)
+						n = n->next;
+					n->next = next_img;
+				}
+				else meta->artwork = next_img;
+				ret += next_img->thumb_size;
+			}
 		}
-	}
-	DPRINTF(E_DEBUG, L_HTTP, "Retrieved %ld bytes image art\n", write_response.pos);
-	if (write_response.pos)
-	{
-		*img_sz = write_response.pos;
-		*img = malloc(*img_sz);
-		memcpy(*img, http_data, *img_sz);
-		ret = write_response.pos;
 	}
 
 movie_imgart_cleanup:
@@ -1196,9 +1459,7 @@ search_ext_meta(uint8_t is_tv, const char *path, char *name, int64_t detailID, u
 
 	metadata_t m_data;
 	uint32_t m_flags = FLAG_MIME|FLAG_DURATION|FLAG_DLNA_PN|FLAG_DATE;
-	char *video_poster = NULL;
 	char *base_art_url = NULL;
-	char *art_sz_str = NULL;
 
 	memset(&m_data, '\0', sizeof(m_data));
 
@@ -1229,6 +1490,11 @@ search_ext_meta(uint8_t is_tv, const char *path, char *name, int64_t detailID, u
 			year ? year : "[19xx-20xx]", season ? season : "[unknown season]",
 			episode ? episode : "[unknown episode]");
 		result = movie_db_search_tv(fetch, clean_name, show, year, &m_data, &m_flags);
+		if (result > 0)
+		{
+
+			//movie_db_get_tv_details(fetch, result, &m_data, &m_flags);
+		}
 	}
 	else
 	{
@@ -1238,19 +1504,35 @@ search_ext_meta(uint8_t is_tv, const char *path, char *name, int64_t detailID, u
 		result = movie_db_search_movies(fetch, clean_name, year, &m_data, &m_flags);
 		if (result > 0)
 		{
-			if (movie_db_get_movie_details(fetch, result, &m_data, &m_flags, &video_poster))
+			struct album_art_name_s *movie_art = NULL;
+			struct album_art_name_s *art_sizes = NULL;
+			movie_db_get_movie_details(fetch, result, &m_data, &m_flags, &movie_art);
+			movie_db_get_movie_credits(fetch, result, &m_data, &m_flags);
+			movie_db_get_configuration(fetch, &base_art_url, &art_sizes);
+			movie_db_get_imageart(fetch, base_art_url, art_sizes, movie_art, &m_data);
+			if (movie_art != NULL)
 			{
-				DPRINTF(E_DEBUG, L_METADATA, "Received movie poster path %s, and genre(s) %s\n",
-					video_poster != NULL ? video_poster : "[none exists]", m_flags & FLAG_GENRE ? m_data.genre : "[unknown]");
+				struct album_art_name_s *next, *m = movie_art;
+				while (m)
+				{
+					free(m->name);
+					next = m->next;
+					free(m);
+					m = next;
+				}
+				movie_art = NULL;
 			}
-			if (movie_db_get_movie_credits(fetch, result, &m_data, &m_flags) == 0)
+			if (art_sizes != NULL)
 			{
-				DPRINTF(E_DEBUG, L_METADATA, "Received movie credits for %s\n", m_data.title);
-			}
-			if (video_poster && strlen(video_poster) && movie_db_get_configuration(fetch, &base_art_url, &art_sz_str))
-			{
-				/* ready to download the poster image */
-				movie_db_get_imageart(fetch, base_art_url, art_sz_str, video_poster, &m_data.thumb_data, &m_data.thumb_size);
+				struct album_art_name_s *next, *m = art_sizes;
+				while (m)
+				{
+					free(m->name);
+					next = m->next;
+					free(m);
+					m = next;
+				}
+				art_sizes = NULL;
 			}
 		}
 	}
@@ -1259,12 +1541,22 @@ search_ext_meta(uint8_t is_tv, const char *path, char *name, int64_t detailID, u
 	{
 		int ret_sql;
 		int64_t img_art = 0;
-		if (m_data.thumb_size)
+		if (m_data.artwork)
 		{
-//			DPRINTF(E_DEBUG, L_METADATA, "Checking if movie poster for path %s is saved...\n", path);
 //			img_art = find_album_art(path, m_data.thumb_data, m_data.thumb_size);
-			*img = m_data.thumb_data;
-			*img_sz = m_data.thumb_size;
+			// TODO: save any available artwork here and free the allocated memory when not needed anymore
+			DPRINTF(E_DEBUG, L_ARTWORK, "Checking artwork for %s: %s\n", path,
+				m_data.artwork->thumb_type == FLAG_ART_TYPE_POSTER ? "poster" :
+				m_data.artwork->thumb_type == FLAG_ART_TYPE_BACKDROP ? "backdrop" :
+				m_data.artwork->thumb_type == FLAG_ART_TYPE_STILL ? "still image" : "unknown"
+			);
+			void *img_data = malloc(m_data.artwork->thumb_size);
+			if (img_data)
+			{
+				memcpy(img_data, m_data.artwork->thumb_data, m_data.artwork->thumb_size);
+				*img = img_data;
+				*img_sz = m_data.artwork->thumb_size;
+			}
 		}
 
 		if (detailID)
@@ -1311,8 +1603,8 @@ cleanup:
 	if (season) free(season);
 	if (episode) free(episode);
 	if (base_art_url) free(base_art_url);
-	if (art_sz_str) free(art_sz_str);
 	free_metadata(&m_data, m_flags);
+	free_metadata_artwork(&m_data);
 
 	return result;
 }
