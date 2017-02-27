@@ -226,8 +226,8 @@ free_metadata(metadata_t *m, uint32_t flags)
 {
 	if( flags & FLAG_TITLE )
 		free(m->title);
-	if( flags & FLAG_SUBTITLE )
-		free(m->subtitle);
+	if( flags & FLAG_DIRECTOR )
+		free(m->director);
 	if( flags & FLAG_ARTIST )
 		free(m->artist);
 	if( flags & FLAG_ALBUM )
@@ -256,10 +256,6 @@ free_metadata(metadata_t *m, uint32_t flags)
 		free(m->duration);
 	if( flags & FLAG_RESOLUTION )
 		free(m->resolution);
-//	if (m->thumb_size)
-//		free(m->thumb_data);
-	if( flags & FLAG_ORIG_TITLE )
-		free(m->original_title);
 	if( flags & FLAG_ORIG_COMMENT )
 		free(m->original_comment);
 	if( flags & FLAG_ORIG_DESCRIPTION )
@@ -268,6 +264,10 @@ free_metadata(metadata_t *m, uint32_t flags)
 		free(m->original_date);
 	if( flags & FLAG_ORIG_RATING )
 		free(m->original_rating);
+	if( flags & FLAG_ORIG_CREATOR )
+		free(m->original_creator);
+	if( flags & FLAG_ORIG_AUTHOR )
+		free(m->original_author);
 }
 
 void

@@ -41,14 +41,15 @@
 #define FLAG_TRACK              0x00004000
 #define FLAG_DISC               0x00008000
 #define FLAG_PUBLISHER          0x00010000
-#define FLAG_SUBTITLE           0x00020000
-#define FLAG_ORIG_TITLE         0x00040000
-#define FLAG_ORIG_COMMENT       0x00080000
-#define FLAG_ORIG_DESCRIPTION   0x00100000
-#define FLAG_ORIG_DATE          0x00200000
-#define FLAG_ORIG_RATING        0x00400000
-#define FLAG_ORIG_TRACK         0x00800000
-#define FLAG_ORIG_DISC          0x01000000
+#define FLAG_DIRECTOR           0x00020000
+#define FLAG_ORIG_COMMENT       0x00040000
+#define FLAG_ORIG_DESCRIPTION   0x00080000
+#define FLAG_ORIG_DATE          0x00100000
+#define FLAG_ORIG_RATING        0x00200000
+#define FLAG_ORIG_TRACK         0x00400000
+#define FLAG_ORIG_DISC          0x00800000
+#define FLAG_ORIG_CREATOR       0x01000000
+#define FLAG_ORIG_AUTHOR        0x02000000
 
 #define ALL_FLAGS               0xFFFFFFFF
 
@@ -66,7 +67,6 @@ typedef struct artwork_s {
 
 typedef struct metadata_s {
 	char *       title;
-	char *       subtitle;
 	char *       artist;
 	char *       creator;
 	char *       publisher;
@@ -87,11 +87,13 @@ typedef struct metadata_s {
 	char *       date;
 	char *       mime;
 	char *       dlna_pn;
-	char *       original_title;
+	char *       director;
 	char *       original_comment;
 	char *       original_description;
 	char *       original_date;
 	char *       original_rating;
+	char *       original_author;
+	char *       original_creator;
 	unsigned int original_disc;
 	unsigned int original_track;
 	artwork_t *  artwork;

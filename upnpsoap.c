@@ -396,6 +396,7 @@ GetCurrentConnectionInfo(struct upnphttp * h, const char * action)
 #define FILTER_UPNP_AUTHOR                       0x0000000001000000
 #define FILTER_DC_PUBLISHER                      0x0000000002000000
 #define FILTER_UPNP_RATING                       0x0000000004000000
+#define FILTER_UPNP_DIRECTOR			 0x0000000008000000
 /* Vendor-specific filter flags */
 #define FILTER_SEC_CAPTION_INFO_EX               0x0100000000000000
 #define FILTER_SEC_DCM_INFO                      0x0200000000000000
@@ -449,7 +450,7 @@ set_filter_flags(char *filter, struct upnphttp *h)
 		}
 		else if (strcmp(item, "upnp:director") == 0)
 		{
-			flags |= FILTER_DC_CREATOR;
+			flags |= FILTER_UPNP_DIRECTOR;
 		}
 		else if (strcmp(item, "upnp:author") == 0)
 		{
@@ -795,10 +796,11 @@ object_exists(const char *object)
 	return (ret > 0);
 }
 
-#define COLUMNS "o.DETAIL_ID, o.CLASS," \
-                " d.SIZE, d.TITLE, d.DURATION, d.BITRATE, d.SAMPLERATE, d.ARTIST," \
-                " d.ALBUM, d.GENRE, d.COMMENT, d.DESCRIPTION, d.CHANNELS, d.TRACK, d.DATE, d.RESOLUTION," \
-                " d.THUMBNAIL, d.CREATOR, d.DLNA_PN, d.MIME, d.ALBUM_ART, d.ROTATION, d.DISC, d.RATING, d.AUTHOR, d.PUBLISHER "
+#define COLUMNS "o.DETAIL_ID, o.CLASS, d.SIZE, d.TITLE, d.DURATION, d.BITRATE, d.SAMPLERATE, d.ARTIST," \
+                " d.ALBUM, d.GENRE, d.COMMENT, d.DESCRIPTION, d.CHANNELS, d.TRACK, d.DATE," \
+                " d.RESOLUTION, d.THUMBNAIL, d.CREATOR, d.DLNA_PN, d.MIME, d.ALBUM_ART, d.ROTATION, d.DISC," \
+                " d.RATING, d.AUTHOR, d.PUBLISHER, d.DIRECTOR, d.ORIGINAL_TRACK, d.ORIGINAL_DISC, " \
+                " d.ORIGINAL_DATE, d.ORIGINAL_RATING "
 #define SELECT_COLUMNS "SELECT o.OBJECT_ID, o.PARENT_ID, o.REF_ID, " COLUMNS
 
 #define NON_ZERO(x) (x && atoi(x))
@@ -844,7 +846,8 @@ callback(void *args, int argc, char **argv, char **azColName)
 	     *duration = argv[7], *bitrate = argv[8], *sampleFrequency = argv[9], *artist = argv[10], *album = argv[11],
 	     *genre = argv[12], *comment = argv[13], *description = argv[14], *nrAudioChannels = argv[15], *track = argv[16], *date = argv[17],
 	     *resolution = argv[18], *tn = argv[19], *creator = argv[20], *dlna_pn = argv[21], *mime = argv[22],
-	     *album_art = argv[23], *rotate = argv[24], *disc = argv[25], *rating = argv[26], *author = argv[27], *publisher = argv[28];
+	     *album_art = argv[23], *rotate = argv[24], *disc = argv[25], *rating = argv[26], *author = argv[27], *publisher = argv[28],
+	     *director = argv[29], *orig_track = argv[30], *orig_disc = argv[31], *orig_date = argv[32], *orig_rating = argv[33];
 	char dlna_buf[128];
 	const char *ext;
 	struct string_s *str = passed_args->str;
@@ -1000,8 +1003,11 @@ callback(void *args, int argc, char **argv, char **azColName)
 		if (description && (passed_args->filter & FILTER_DC_LONG_DESCRIPTION)) {
 			ret = append(str, description, "upnp:longDescription");
 		}
+		if ( director && (passed_args->filter & FILTER_UPNP_DIRECTOR) ) {
+			ret = append(str, director, "upnp:director");
+		}
 		if( creator && (passed_args->filter & FILTER_DC_CREATOR) ) {
-			ret = append(str, creator, *mime == 'v' ? "upnp:director" : "dc:creator");
+			ret = append(str, creator, *mime == 'v' ? "upnp:producer" : "dc:creator");
 		}
 		if (publisher && (passed_args->filter & FILTER_DC_PUBLISHER))
 		{
@@ -1034,7 +1040,7 @@ callback(void *args, int argc, char **argv, char **azColName)
 			ret = append(str, album, *mime == 'v' ? "upnp:seriesTitle" : "upnp:album");
 		}
 		if( genre && (passed_args->filter & FILTER_UPNP_GENRE) ) {
-			ret = append_multiple_from_separated_string(str, genre, "upnp:genre", '|');
+			ret = append_multiple_from_separated_string(str, genre, "upnp:genre", ',');
 		}
 		if( strncmp(id, MUSIC_PLIST_ID, strlen(MUSIC_PLIST_ID)) == 0 ) {
 			track = strrchr(id, '$')+1;
@@ -1044,6 +1050,9 @@ callback(void *args, int argc, char **argv, char **azColName)
 		}
 		if( NON_ZERO(disc) && *mime == 'v' && (passed_args->filter & FILTER_UPNP_ORIGINALTRACKNUMBER) ) {
 			ret = append(str, disc, "upnp:episodeSeason");
+		}
+		if( NON_ZERO(orig_track) && *mime == 'v' && (passed_args->filter & FILTER_UPNP_ORIGINALTRACKNUMBER) ) {
+			ret = append(str, orig_disc, "upnp:episodeCount");
 		}
 		if( passed_args->filter & FILTER_RES ) {
 			ext = mime_to_ext(mime);
@@ -1228,7 +1237,7 @@ callback(void *args, int argc, char **argv, char **azColName)
 			ret = append(str, publisher, "dc:publisher");
 		}
 		if( genre && (passed_args->filter & FILTER_UPNP_GENRE) ) {
-			ret = append_multiple_from_separated_string(str, genre, "upnp:genre", '|');
+			ret = append_multiple_from_separated_string(str, genre, "upnp:genre", ',');
 		}
 		if( artist && (passed_args->filter & FILTER_UPNP_ARTIST) ) {
 			ret = append_multiple_from_separated_string(str, artist, "upnp:artist", ',');
@@ -1450,7 +1459,6 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 				      where, THISORNUL(orderBy), StartingIndex, RequestedCount);
 		DPRINTF(E_DEBUG, L_HTTP, "Browse SQL: %s\n", sql);
 		ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
-		DPRINTF(E_DEBUG, L_HTTP, "TEST\n");
 	}
 	if( (ret != SQLITE_OK) && (zErrMsg != NULL) )
 	{

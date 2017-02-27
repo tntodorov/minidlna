@@ -114,6 +114,7 @@ insert_container(const char *item, const char *rootParent, const char *refID, co
 			                " and d.ARTIST %s %Q"
 	                                " and o.CLASS = 'container.%s' limit 1",
 	                                rootParent, item, artist?"like":"is", artist, class);
+
 	if( result )
 	{
 		base = strrchr(result, '$');
@@ -138,6 +139,8 @@ insert_container(const char *item, const char *rootParent, const char *refID, co
 		{
 			detailID = GetFolderMetadata(item, NULL, artist, genre, (album_art ? strtoll(album_art, NULL, 10) : 0));
 		}
+//		DPRINTF(E_DEBUG, L_DB_SQL, "insert_container nothing found, inserting obj_id=%s$%llX, parent_id=%s, ref_id=%s, detail_id=%lld, class=container.%s, name=%s\n",
+//			rootParent, (long long)*parentID, rootParent, refID, (long long)detailID, class, item);
 		ret = sql_exec(db, "INSERT into OBJECTS"
 		                   " (OBJECT_ID, PARENT_ID, REF_ID, DETAIL_ID, CLASS, NAME) "
 		                   "VALUES"
@@ -150,6 +153,24 @@ insert_container(const char *item, const char *rootParent, const char *refID, co
 	return ret;
 }
 
+char*
+sql_get_season_folder_for_series(const char *refID, const char *name)
+{
+	char *series_album_art = NULL;
+	char *refID_buf = strdup(refID);
+	char *last = NULL;
+
+	do {
+		last = strip_char(refID_buf, '$');
+		series_album_art = sql_get_text_field(db, "SELECT ALBUM_ART from DETAILS d INNER JOIN OBJECTS o on (d.ID = o.DETAIL_ID)"
+			" where o.PARENT_ID in (SELECT o.OBJECT_ID from DETAILS d INNER JOIN OBJECTS o ON (d.ID = o.DETAIL_ID) where d.ALBUM = %Q)"
+			" and o.OBJECT_ID = %Q", name, refID_buf);
+	} while (series_album_art == NULL && *refID_buf != '\0' && last != NULL);
+
+	free(refID_buf);
+	return series_album_art;
+}
+
 void
 insert_containers_for_video(const char *name, const char *refID, const char *class, int64_t detailID)
 {
@@ -157,13 +178,13 @@ insert_containers_for_video(const char *name, const char *refID, const char *cla
 	char **result;
 	int nrows;
 	int64_t objectID, parentID;
-	static long long last_movie_objectID = 0;
+	static long long last_media_objectID = 0;
 
-	snprintf(sql, sizeof(sql), "SELECT ALBUM, DISC, GENRE from DETAILS where ID = %lld", (long long)detailID);
+	snprintf(sql, sizeof(sql), "SELECT ALBUM, DISC, GENRE, ORIGINAL_DESCRIPTION from DETAILS where ID = %lld", (long long)detailID);
 	if (sql_get_table(db, sql, &result, &nrows, NULL) != SQLITE_OK) return;
 	if (nrows == 0) goto _exit;
 
-	char *series = result[3], *season = result[4], *genres_str = result[5];
+	char *series = result[4], *season = result[5], *genres_str = result[6], *description = result[7];
 	static struct virtual_item last_series;
 	static struct virtual_item last_season;
 	struct genre_s *genre_tok = NULL;
@@ -175,7 +196,7 @@ insert_containers_for_video(const char *name, const char *refID, const char *cla
 	{
 		DPRINTF(E_DEBUG, L_METADATA, "Processing the following genre(s) %s\n", genres_str);
 		char *string, *word;
-		for (string = genres_str; (word = strtok(string, "|")); string = NULL)
+		for (string = genres_str; (word = strtok(string, ",")); string = NULL)
 		{
 			struct genre_s * this_genre = calloc(1, sizeof(struct genre_s));
 			this_genre->name = strdup(word);
@@ -196,15 +217,15 @@ insert_containers_for_video(const char *name, const char *refID, const char *cla
 		int ret = sql_get_int64_field(db, "SELECT ID from OBJECTS WHERE DETAIL_ID = %lld and OBJECT_ID like '"VIDEO_MOVIES_ALL_ID"$'", (long long)detailID);
 		if (ret == 0)
 		{
-			if (!last_movie_objectID)
+			if (!last_media_objectID)
 			{
-				last_movie_objectID = get_next_available_id("OBJECTS", VIDEO_MOVIES_ALL_ID);
+				last_media_objectID = get_next_available_id("OBJECTS", VIDEO_MOVIES_ALL_ID);
 			}
 			sql_exec(db, "INSERT into OBJECTS"
 				 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
 				 "VALUES"
 				 " ('"VIDEO_MOVIES_ALL_ID"$%llX', '"VIDEO_MOVIES_ALL_ID"', '%s', '%s', %lld, %Q)",
-				 last_movie_objectID++, refID, class, (long long)detailID, name);
+				 last_media_objectID++, refID, class, (long long)detailID, name);
 		}
 		if (genre_tok)
 		{
@@ -254,44 +275,104 @@ insert_containers_for_video(const char *name, const char *refID, const char *cla
 			}
 		}
 	}
+	else if (strcmp(class, "item.videoItem.videoBroadcast") == 0)
+	{
+		int ret = sql_get_int64_field(db, "SELECT ID from OBJECTS WHERE DETAIL_ID = %lld and OBJECT_ID like '"VIDEO_SERIES_ALL_ID"$'", (long long)detailID);
+		if (ret == 0)
+		{
+			if (!last_media_objectID)
+			{
+				last_media_objectID = get_next_available_id("OBJECTS", VIDEO_SERIES_ALL_ID);
+			}
+			sql_exec(db, "INSERT into OBJECTS"
+				 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
+				 "VALUES"
+				 " ('"VIDEO_SERIES_ALL_ID"$%llX', '"VIDEO_SERIES_ALL_ID"', '%s', '%s', %lld, %Q)",
+				 last_media_objectID++, refID, class, (long long)detailID, name);
+		}
+		if (genre_tok)
+		{
+			bool must_create;
+			struct genre_virtual_item *last_tv_genre;
+			struct genre_s *the_genre;
+			for (the_genre = genre_tok; the_genre != NULL; the_genre = the_genre->next)
+			{
+				DPRINTF(E_DEBUG, L_METADATA, "Checking genre container for %s.\n", the_genre->name);
+				must_create = true;
+				for (last_tv_genre = genre_list; last_tv_genre != NULL; last_tv_genre = last_tv_genre->next)
+				{
+					if (strcmp(the_genre->name, last_tv_genre->genre->name) == 0)
+					{
+						must_create = false;
+						break;
+					}
+				}
+				if (must_create)
+				{
+					last_tv_genre = calloc(1, sizeof(struct genre_virtual_item));
+					last_tv_genre->genre = calloc(1, sizeof(struct virtual_item));
+					insert_container(the_genre->name, VIDEO_SERIES_GENRE_ID, NULL, "genre.videoGenre", NULL, NULL, NULL, &objectID, &parentID);
+					sprintf(last_tv_genre->genre->parentID, VIDEO_SERIES_GENRE_ID"$%llX", (long long)parentID);
+					strncpyt(last_tv_genre->genre->name, the_genre->name, sizeof(last_tv_genre->genre->name));
+					last_tv_genre->genre->objectID = objectID;
+					if (genre_list)
+					{
+						struct genre_virtual_item *all = genre_list;
+						while (all->next)
+							all = all->next;
+						all->next = last_tv_genre;
+					}
+					else
+						genre_list = last_tv_genre;
+				}
+				else
+				{
+					last_tv_genre->genre->objectID++;
+				}
+				sql_exec(db, "INSERT into OBJECTS"
+						 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
+						 "VALUES"
+						 " ('%s$%llX', '%s', '%s', '%s', %lld, %Q)",
+					 last_tv_genre->genre->parentID, last_tv_genre->genre->objectID,
+					 last_tv_genre->genre->parentID, refID, class, (long long)detailID, name);
+			}
+		}
+		if (!valid_cache || strcmp(series, last_series.name) != 0)
+		{
+			char *series_album_art = sql_get_text_field(db, "SELECT ALBUM_ART from DETAILS d where ALBUM = (SELECT ALBUM from DETAILS d INNER JOIN OBJECTS o ON (d.ID = o.DETAIL_ID) where o.OBJECT_ID = %Q and class = 'item.videoItem.videoBroadcast') LIMIT 1", refID);
+			insert_container(series, VIDEO_SERIES_ID, NULL, "playlistContainer", NULL, NULL, series_album_art, &objectID, &parentID);
+			int det_id = sql_get_int_field(db, "SELECT DETAIL_ID FROM OBJECTS WHERE NAME = '%q' AND PARENT_ID = %Q AND CLASS LIKE 'container.playlistContainer';", series, VIDEO_SERIES_ID);
+			if (det_id > 0)
+			{
+				sql_exec(db, "UPDATE DETAILS set DESCRIPTION = %Q WHERE ID = %lld;", description, det_id);
+			}
+			sprintf(last_series.parentID, VIDEO_SERIES_ID"$%llX", (long long)parentID);
+			strncpyt(last_series.name, series, sizeof(last_series.name));
+			sqlite3_free(series_album_art);
+		}
+		if (!valid_cache || strcmp(season, last_season.name) != 0)
+		{
+			char *season_name;
+			xasprintf(&season_name, _("Season %02d"), atoi(season));
+			char *season_album_art = sql_get_season_folder_for_series(refID, last_series.name);
+			insert_container(season_name, last_series.parentID, NULL, "playlistContainer", NULL, NULL, season_album_art, &objectID, &parentID);
+			sprintf(last_season.parentID, "%s$%llX", last_series.parentID, (long long)parentID);
+			strncpyt(last_season.name, season, sizeof(last_season.name));
+			last_season.objectID = objectID;
+			sqlite3_free(season_album_art);
+			free(season_name);
+		}
+		else
+		{
+			last_season.objectID++;
+		}
 
-
-//	if (video_type == TVEPISODE && series)
-//	{
-//		if (!valid_cache || strcmp(series, last_series.name) != 0)
-//		{
-//			char *series_album_art = sql_get_text_field(db, "SELECT ALBUM_ART from DETAILS d where VIDEO_TYPE = %u and ALBUM = (SELECT ALBUM from DETAILS d INNER JOIN OBJECTS o ON (d.ID = o.DETAIL_ID) where o.OBJECT_ID = %Q)", TVSERIES, refID);
-//			insert_container(series, VIDEO_SERIES_ID, NULL, "playlistContainer", NULL, NULL, series_album_art, &objectID, &parentID);
-//			sprintf(last_series.parentID, VIDEO_SERIES_ID"$%llX", (long long)parentID);
-//			strncpyt(last_series.name, series, sizeof(last_series.name));
-//			sqlite3_free(series_album_art);
-//		}
-//	}
-//	if (video_type == TVEPISODE && season)
-//	{
-//		if (!valid_cache || strcmp(season, last_season.name) != 0)
-//		{
-//			char *season_name;
-//			xasprintf(&season_name, _("Season %02d"), atoi(season));
-//			char *season_album_art = sql_get_season_folder_for_series(refID, last_series.name);
-//			insert_container(season_name, last_series.parentID, NULL, "playlistContainer", NULL, NULL, season_album_art, &objectID, &parentID);
-//			sprintf(last_season.parentID, "%s$%llX", last_series.parentID, (long long)parentID);
-//			strncpyt(last_season.name, season, sizeof(last_season.name));
-//			last_season.objectID = objectID;
-//			sqlite3_free(season_album_art);
-//			free(season_name);
-//		}
-//		else
-//		{
-//			last_season.objectID++;
-//		}
-//
-//		sql_exec(db, "INSERT into OBJECTS"
-//				 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
-//				 "VALUES"
-//				 " ('%s$%llX', '%s', '%s', '%s', %lld, %Q)",
-//			 last_season.parentID, last_season.objectID, last_season.parentID, refID, class, (long long)detailID, name);
-//	}
+		sql_exec(db, "INSERT into OBJECTS"
+			 " (OBJECT_ID, PARENT_ID, REF_ID, CLASS, DETAIL_ID, NAME) "
+			 "VALUES"
+			 " ('%s$%llX', '%s', '%s', '%s', %lld, %Q)",
+			 last_season.parentID, last_season.objectID, last_season.parentID, refID, class, (long long)detailID, name);
+	}
 
 _exit:
 	sqlite3_free_table(result);

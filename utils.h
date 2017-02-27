@@ -83,9 +83,10 @@ char *modifyString(char *string, const char *before, const char *after, int noal
 char *escape_tag(const char *tag, int force_alloc);
 char *unescape_tag(const char *tag, int force_alloc);
 char *strip_ext(char *name);
+char *strip_char(char *name, char c);
 char *cleanup_name(char *name, const char *strip);
-char *strip_year(char *name);
-void split_tv_name(const char *input, char **show_name, char **year, char **season, char **episode);
+int strip_year(char *name);
+void split_tv_name(const char *input, char **show_name, int *year, int *season, int *episode);
 
 /* Metadata functions */
 int is_video(const char * file);

@@ -265,6 +265,16 @@ strip_ext(char *name)
 }
 
 char *
+strip_char(char *name, char c)
+{
+	char *last_occurence = strrchr(name, c);
+	if (last_occurence)
+		*last_occurence = '\0';
+
+	return last_occurence;
+}
+
+char *
 cleanup_name(char *name, const char *strip)
 {
 	char *clean;
@@ -292,7 +302,7 @@ cleanup_name(char *name, const char *strip)
 	return trim(clean);
 }
 
-char *
+int
 strip_year(char *name)
 {
 	char *idx, year[5] = { 0 };
@@ -331,13 +341,12 @@ strip_year(char *name)
 	if ((counter == 4) && (starts_at > 0))
 	{
 		/* we found a valid year, duplicate it and cut off from it to the end of the name */
-		char *ret = strdup(year);
 		idx[starts_at] = '\0';
 		trim(idx);
-		return ret;
+		return atoi(year);
 	}
 
-	return NULL;
+	return 0;
 }
 
 enum char_type_e
@@ -346,7 +355,7 @@ enum char_type_e
 };
 
 void
-split_tv_name(const char *input, char **show_name, char **year, char **season, char **episode)
+split_tv_name(const char *input, char **show_name, int *year, int *season, int *episode)
 {
 	char *work = NULL;
 	int found_season = 0, found_episode = 0, found_year = 0;
@@ -356,6 +365,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 	uint8_t digit_count = 0;
 	size_t total_count = 0;
 	enum char_type_e previous = CHARACTER;
+	char *year_str = NULL, *season_str = NULL, *episode_str = NULL;
 
 	if (input == NULL || strlen(input) == 0)
 		return;
@@ -395,7 +405,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 						if (year_num > 1900)
 						{
 							found_year = 1;
-							*year = strdup(tmp);
+							year_str = strdup(tmp);
 							year_pos = total_count - 5;
 						}
 					}
@@ -409,10 +419,10 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 						{
 							found_episode = 1;
 							found_season = 1;
-							*season = strdup(tmp);
+							season_str = strdup(tmp);
 							memset(tmp, 0, 10);
 							snprintf(tmp, 10, "%d", episode_num);
-							*episode = strdup(tmp);
+							episode_str = strdup(tmp);
 							season_pos = total_count - 5;
 							episode_pos = total_count - 3;
 						}
@@ -430,10 +440,10 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 						{
 							found_episode = 1;
 							found_season = 1;
-							*season = strdup(tmp);
+							season_str = strdup(tmp);
 							memset(tmp, 0, 10);
 							snprintf(tmp, 10, "%d", episode_num);
-							*episode = strdup(tmp);
+							episode_str = strdup(tmp);
 							season_pos = total_count - 4;
 							episode_pos = total_count - 3;
 						}
@@ -448,7 +458,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 						{
 							found_season = 1;
 							season_pos = total_count - 4;
-							*season = strdup(tmp);
+							season_str = strdup(tmp);
 						}
 					}
 					else if (found_season && !found_episode && (total_count > 2) && ((work[total_count - 3] == 'E') || (work[total_count - 3] == 'e')))
@@ -458,7 +468,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 						{
 							found_episode = 1;
 							episode_pos = total_count - 4;
-							*episode = strdup(tmp);
+							episode_str = strdup(tmp);
 						}
 					}
 				}
@@ -471,7 +481,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 						{
 							found_season = 1;
 							season_pos = total_count - 3;
-							*season = strdup(tmp);
+							season_str = strdup(tmp);
 						}
 					}
 					else if (found_season && !found_episode && (total_count > 1) && ((work[total_count - 1] == 'E') || (work[total_count - 1] == 'e')))
@@ -481,7 +491,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 						{
 							found_episode = 1;
 							episode_pos = total_count - 3;
-							*episode = strdup(tmp);
+							episode_str = strdup(tmp);
 						}
 					}
 				}
@@ -512,10 +522,10 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 			{
 				found_episode = 1;
 				found_season = 1;
-				*season = strdup(tmp);
+				season_str = strdup(tmp);
 				memset(tmp, 0, 10);
 				snprintf(tmp, 10, "%d", episode_num);
-				*episode = strdup(tmp);
+				episode_str = strdup(tmp);
 				season_pos = total_count - 5;
 				episode_pos = total_count - 3;
 			}
@@ -526,7 +536,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 			if (year_num > 1900)
 			{
 				found_year = 1;
-				*year = strdup(tmp);
+				year_str = strdup(tmp);
 				year_pos = total_count - 5;
 			}
 		}
@@ -543,10 +553,10 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 			{
 				found_episode = 1;
 				found_season = 1;
-				*season = strdup(tmp);
+				season_str = strdup(tmp);
 				memset(tmp, 0, 10);
 				snprintf(tmp, 10, "%d", episode_num);
-				*episode = strdup(tmp);
+				episode_str = strdup(tmp);
 				season_pos = total_count - 4;
 				episode_pos = total_count - 3;
 			}
@@ -557,7 +567,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 			if (episode_num > 0)
 			{
 				found_episode = 1;
-				*episode = strdup(tmp);
+				episode_str = strdup(tmp);
 				episode_pos = total_count - 3;
 			}
 		}
@@ -568,7 +578,7 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 		if (episode_num > 0)
 		{
 			found_episode = 1;
-			*episode = strdup(tmp);
+			episode_str = strdup(tmp);
 			episode_pos = total_count - digit_count;
 		}
 	}
@@ -600,6 +610,24 @@ split_tv_name(const char *input, char **show_name, char **year, char **season, c
 
 clean_up:
 	free(work);
+	if (year_str)
+	{
+		*year = atoi(year_str);
+		free(year_str);
+	}
+	else *year = 0;
+	if (season_str)
+	{
+		*season = atoi(season_str);
+		free(season_str);
+	}
+	else *season = 0;
+	if (episode_str)
+	{
+		*episode = atoi(episode_str);
+		free(episode_str);
+	}
+	else *episode = 0;
 	if (bkp) free(bkp);
 }
 
